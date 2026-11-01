@@ -1,66 +1,64 @@
 # AWG Pilot
 
-**An AmneziaWG VPN client for Windows and Android** that keeps the connection alive by itself, shows where your traffic goes, and stays out of the way.
+**VPN-клиент AmneziaWG для Windows и Android**, который сам держит соединение, показывает, куда уходит трафик, и не мешает работать.
 
-[Русская версия](README.ru.md) · [Download](../../releases/latest)
+[English version](README.en.md) · [Скачать](../../releases/latest)
 
-![AWG Pilot on Windows](docs/screenshots/main.jpg)
+![AWG Pilot в Windows](docs/screenshots/main.jpg)
 
-## Features
+## Возможности
 
-**Connection**
-- AmneziaWG 3.1 engine (compatible with AmneziaWG 2.0 servers).
-- Works with keys starting with `vpn://` (so far tested with Sotka VPN keys) and with AmneziaVPN keys (`.vpn` files), plus AmneziaWG `.conf` files; several profiles side by side.
-- Self-healing link: the server is pinged every 5 seconds. When pings stop, AWG Pilot reconnects, reconnects again, fetches a fresh config, moves to the next profile, asks the provider for another server, and repeats the round until the link works. A Wi-Fi ↔ mobile switch is checked within seconds.
+**Подключение**
+- Движок AmneziaWG 3.1 (работает и с серверами AmneziaWG 2.0).
+- Совместим с ключами, начинающимися на `vpn://` (пока проверено только с ключами Sotka VPN), и с ключами AmneziaVPN (файлы `.vpn`), а также с конфигами AmneziaWG `.conf`; несколько профилей.
+- Автовосстановление: сервер пингуется каждые 5 секунд. Если пинг пропал, AWG Pilot переподключается, пробует ещё раз, берёт свежий конфиг, переходит на следующий профиль, просит у провайдера другой сервер и повторяет круг, пока связь не появится. Переход Wi-Fi ↔ мобильная сеть проверяется за секунды.
 
-**Protection**
-- Kill switch and "no internet while the VPN is down" lockdown (Windows Filtering Platform).
-- "Only through the VPN" for chosen programs (Windows) and per-app split tunnelling (Android).
-- IPv6 leak protection, custom DNS (Cloudflare, Quad9, AdGuard or your own), Russian networks bypassing the VPN.
+**Защита**
+- Kill switch и отключение интернета при обрыве VPN (фильтры Windows Filtering Platform).
+- «Только через VPN» для выбранных программ (Windows) и выбор приложений для туннеля (Android).
+- Защита от утечки IPv6, свой DNS (Cloudflare, Quad9, AdGuard или свои адреса), российские сети мимо VPN.
 
-**Insight**
-- Built-in speed test that measures the tunnel, not your Wi-Fi.
-- Daily usage statistics and a traffic log by program and destination (host names from DNS and TLS) for a day, a week, a month, 6 or 12 months or all time.
-- A transparent DU Meter style status window on the desktop (Windows).
+**Контроль**
+- Тест скорости, который меряет именно туннель, а не Wi-Fi.
+- Статистика трафика по дням и журнал по программам и адресам (имена сайтов из DNS и TLS) за день, неделю, месяц, 6 и 12 месяцев или всё время.
+- Прозрачное окошко статуса на рабочем столе в стиле DU Meter (Windows).
 
-**Look**
-- 11 colour themes: the default dark one plus 10 flat two-colour skins.
+**Оформление**
+- 11 тем: тёмная по умолчанию и 10 плоских двухцветных.
 
-![Traffic by program](docs/screenshots/traffic.jpg)
+![Трафик по программам](docs/screenshots/traffic.jpg)
 
-![Colour themes](docs/screenshots/skins.png)
+![Темы оформления](docs/screenshots/skins.png)
 
-## Install
+## Установка
 
-Download the files from [Releases](../../releases/latest).
+Файлы лежат в [Releases](../../releases/latest).
 
-**Windows 10/11 (x64):** run `AWGPilot-<version>-Windows-x64-setup.exe`. Administrator rights are needed once: the installer registers the "AWG Pilot VPN" service that holds the tunnel, so the window itself runs without them. The installer is not code-signed yet, so SmartScreen will warn: choose "More info" → "Run anyway".
+**Windows 10/11 (x64):** запустите `AWGPilot-<версия>-Windows-x64-setup.exe`. Права администратора нужны один раз: установщик регистрирует службу «AWG Pilot VPN», которая держит туннель, а само окно работает без них. Подписи кода пока нет, поэтому SmartScreen предупредит: «Подробнее» → «Выполнить в любом случае».
 
-**Android 5.0+:** install `AWGPilot-<version>-Android.apk` and allow installs from that source. One APK covers arm64, armv7 and x86_64.
+**Android 5.0+:** установите `AWGPilot-<версия>-Android.apk` и разрешите установку из этого источника. Один APK подходит для arm64, armv7 и x86_64.
 
-## First steps
+## Первые шаги
 
-1. Turn off any other VPN client that uses the same key: two clients with one key revoke each other's configs.
-2. Open AWG Pilot → **Keys and profiles** → paste a key or import a `.vpn` / `.conf` file.
-3. Press the power button. The status window and the traffic log are in **Settings** and **Statistics**.
+1. Выключите другие VPN-клиенты с тем же ключом: два клиента с одним ключом отзывают конфиги друг у друга.
+2. Откройте AWG Pilot → **Профили и ключи** → вставьте ключ или импортируйте файл `.vpn` / `.conf`.
+3. Нажмите кнопку питания. Окошко статуса и журнал трафика — в **Настройках** и **Статистике**.
 
-The interface is in Russian.
+## Как устроено
 
-## How it works
+На обеих платформах работает одно ядро на Go. В Windows служба LocalSystem владеет адаптером WinTun, маршрутами, DNS и правилами брандмауэра, а окно на Wails управляет ею через именованный канал. В Android ядро — библиотека JNI за `VpnService` с интерфейсом в WebView. Ключи и конфиги хранятся зашифрованными (DPAPI в Windows, Android Keystore в Android). Подробности и сборка — в [docs/DEVELOPMENT.ru.md](docs/DEVELOPMENT.ru.md).
 
-The same Go core runs on both platforms. On Windows a LocalSystem service owns the WinTun adapter, routes, DNS and firewall rules, and the Wails window talks to it over a named pipe. On Android the core is a JNI library behind `VpnService` with a WebView interface. Keys and configs are stored encrypted (DPAPI on Windows, Android Keystore on Android). See [docs/DEVELOPMENT.ru.md](docs/DEVELOPMENT.ru.md) for the internals and build steps.
+## Сборка из исходников
 
-## Build from source
+- **Windows:** Go 1.26, Node.js, [Wails v2](https://wails.io): `wails build -platform windows/amd64 -trimpath -ldflags "-s -w"`, для установщика добавьте `-nsis` (нужен NSIS 3).
+- **Android:** Android SDK (build-tools 36.1, platform 36), NDK 28, JDK 17+: `android\build.ps1`, Gradle не нужен.
 
-- **Windows:** Go 1.26, Node.js, [Wails v2](https://wails.io): `wails build -platform windows/amd64 -trimpath -ldflags "-s -w"`, add `-nsis` (NSIS 3) for the installer.
-- **Android:** Android SDK (build-tools 36.1, platform 36), NDK 28, JDK 17+: `android\build.ps1`, no Gradle needed.
+## Благодарности
 
-## Credits
+В основе: [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go), [amneziawg-windows](https://github.com/amnezia-vpn/amneziawg-windows), [WinTun](https://www.wintun.net), [Wails](https://wails.io) и [gVisor](https://gvisor.dev). Лицензии — в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Built on [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go), [amneziawg-windows](https://github.com/amnezia-vpn/amneziawg-windows), [WinTun](https://www.wintun.net), [Wails](https://wails.io) and [gVisor](https://gvisor.dev). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+AWG Pilot — независимый проект, не связанный с Amnezia, WireGuard или каким-либо VPN-провайдером. WireGuard — зарегистрированный товарный знак Jason A. Donenfeld.
 
-AWG Pilot is an independent project and is not affiliated with Amnezia, WireGuard or any VPN provider. WireGuard is a registered trademark of Jason A. Donenfeld.
+## Лицензия
 
-## License
-
-Not chosen yet: all rights reserved until the project is published.
+Пока не выбрана: до публикации все права защищены.
