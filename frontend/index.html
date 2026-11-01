@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>AWG Pilot</title>
+    <style>html, body { background: #0e1218; } #app { visibility: hidden; }</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+        <linearGradient id="gAccent" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#5fe0b0"/><stop offset="1" stop-color="#2f9e78"/>
+        </linearGradient>
+        <linearGradient id="gArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#3fb68b" stop-opacity=".35"/><stop offset="1" stop-color="#3fb68b" stop-opacity="0"/>
+        </linearGradient>
+        <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3.1 8.2-7.5 9.9-4.4-1.7-7.5-5.3-7.5-9.9V6z"/><path d="M8.8 12.2l2.3 2.3 4.3-4.6"/></symbol>
+        <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15.5" r="4.5"/><path d="M11.3 12.2L20 3.5M16.5 7l2.6 2.6M14 9.5l2 2"/></symbol>
+        <symbol id="i-split" viewBox="0 0 24 24"><path d="M12 21v-7.5c0-1.3-.5-2.5-1.4-3.4L4 3.5M12 13.5c0-1.3.5-2.5 1.4-3.4L20 3.5"/><path d="M4 9V3.5h5.5M20 9V3.5h-5.5"/></symbol>
+        <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3.5 20.5h17"/><rect x="5" y="11" width="3.2" height="6.5" rx="1"/><rect x="10.4" y="6" width="3.2" height="11.5" rx="1"/><rect x="15.8" y="13" width="3.2" height="4.5" rx="1"/></symbol>
+        <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></symbol>
+        <symbol id="i-log" viewBox="0 0 24 24"><rect x="4.5" y="3" width="15" height="18" rx="2.5"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></symbol>
+        <symbol id="i-exit" viewBox="0 0 24 24"><path d="M10 20.5H6.5a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2H10"/><path d="M15.5 16.5L20 12l-4.5-4.5M20 12H9.5"/></symbol>
+        <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3.5v8"/><path d="M6.5 7a7.8 7.8 0 1 0 11 0"/></symbol>
+        <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4.5v15M6 13.5l6 6 6-6"/></symbol>
+        <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19.5v-15M6 10.5l6-6 6 6"/></symbol>
+        <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2.5 12h4l2.5-6 4 12 2.5-6h6"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11.5A8 8 0 0 0 5.6 7M4 12.5A8 8 0 0 0 18.4 17"/><path d="M5 3v4.5h4.5M19 21v-4.5h-4.5"/></symbol>
+        <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h14l-3.5-3.5M20 16H6l3.5 3.5"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+        <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11.5v6M9 14.5l3 3 3-3"/></symbol>
+        <symbol id="i-save" viewBox="0 0 24 24"><path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5"/><path d="M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></symbol>
+        <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.2 17.5a9 9 0 1 1 15.6 0"/><path d="M12 13.5l4.2-4.2"/><circle cx="12" cy="13.5" r="1.4"/></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    </defs>
+</svg>
+
+<div id="app">
+    <aside class="rail">
+        <div class="logo" id="logo">
+            <svg viewBox="0 0 24 24"><rect x="1" y="1" width="22" height="22" rx="6.5" fill="#1b232e" stroke="#2c3747"/><path d="M12 6.2v5.3M8.4 8.5a5.2 5.2 0 1 0 7.2 0" fill="none" stroke="url(#gAccent)" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </div>
+        <div id="railVer" class="rail-ver"></div>
+        <nav>
+            <button class="tab active" data-tab="connect" data-short="VPN" data-tip="Подключение" aria-label="Подключение"><svg><use href="#i-shield"/></svg></button>
+            <button class="tab" data-tab="account" data-short="Профили" data-tip="Профили и ключи" aria-label="Профили и ключи"><svg><use href="#i-key"/></svg></button>
+            <button class="tab" data-tab="split" data-short="Сплит" data-tip="Раздельный туннель" aria-label="Раздельный туннель"><svg><use href="#i-split"/></svg></button>
+            <button class="tab" data-tab="stats" data-short="Трафик" data-tip="Статистика" aria-label="Статистика"><svg><use href="#i-chart"/></svg></button>
+            <button class="tab" data-tab="settings" data-short="Настройки" data-tip="Настройки" aria-label="Настройки"><svg><use href="#i-sliders"/></svg></button>
+            <button class="tab" data-tab="logs" data-short="Журнал" data-tip="Журнал" aria-label="Журнал"><svg><use href="#i-log"/></svg></button>
+        </nav>
+        <button id="btnQuit" class="tab quit desk-only" data-tip="Выход: отключить VPN и закрыть" aria-label="Выход"><svg><use href="#i-exit"/></svg></button>
+    </aside>
+
+    <main>
+        <header class="top">
+            <h1 id="pageTitle">Подключение</h1>
+            <span id="pill" class="pill"><span class="pdot"></span><span id="pillText">Не защищено</span></span>
+        </header>
+
+        <div class="scroll">
+        <section id="tab-connect" class="page">
+            <div class="hero">
+                <div class="orb">
+                    <span class="ring r1"></span><span class="ring r2"></span>
+                    <button id="btnPower" class="power" aria-label="Подключить / отключить"><svg><use href="#i-power"/></svg></button>
+                </div>
+                <div id="statusTitle" class="status-title">Отключено</div>
+                <div id="statusSub" class="status-sub"></div>
+                <div id="stUptime" class="timer">00:00:00</div>
+            </div>
+
+            <div id="alert" class="alert hidden">
+                <span id="alertText"></span>
+                <span class="alert-actions">
+                    <button id="btnAlertAction" class="sm hidden">Другой сервер</button>
+                    <button id="btnUnlock" class="sm danger hidden">Разблокировать интернет</button>
+                    <button id="btnAlertClose" class="icon" data-tip="Скрыть" aria-label="Скрыть"><svg><use href="#i-x"/></svg></button>
+                </span>
+            </div>
+
+            <div class="metrics">
+                <div class="metric"><svg class="mi rx"><use href="#i-down"/></svg><div><div id="spRx" class="mv">—</div><div class="mk">Загрузка</div></div></div>
+                <div class="metric"><svg class="mi tx"><use href="#i-up"/></svg><div><div id="spTx" class="mv">—</div><div class="mk">Отдача</div></div></div>
+                <div class="metric"><svg class="mi ping"><use href="#i-pulse"/></svg><div><div id="spPing" class="mv">—</div><div class="mk">Пинг</div></div></div>
+            </div>
+            <div class="card chart">
+                <svg id="chart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-label="Скорость за 2 минуты">
+                    <path id="areaRx" fill="url(#gArea)"/>
+                    <polyline id="lineRx" fill="none" stroke-width="2"/>
+                    <polyline id="lineTx" fill="none" stroke-width="1.6"/>
+                </svg>
+                <div class="legend"><span class="dot rx"></span>загрузка <span class="dot tx"></span>отдача <span class="grow"></span>пик <span id="chartPeak">—</span></div>
+                <button id="btnSpeed" class="speedbtn" aria-label="Тест скорости"><svg><use href="#i-gauge"/></svg><span>Тест скорости</span></button>
+            </div>
+
+            <div class="card kv">
+                <div><span>Сервер</span><b id="stEndpoint">—</b></div>
+                <div><span>Рукопожатие</span><b id="stHandshake">—</b></div>
+                <div><span>Трафик ↓/↑</span><b id="stTraffic">—</b></div>
+                <div><span>Маршрутизация</span><b id="stRouting">—</b></div>
+                <div class="desk-only"><span>Kill switch</span><b id="stKill">—</b></div>
+                <div><span>IPv6</span><b id="stIPv6">—</b></div>
+                <div class="wide"><span id="stAppsK">Программы только через VPN</span><b id="stApps">—</b></div>
+            </div>
+
+            <div class="row center">
+                <label class="sel">Страна <select id="selCountry"><option value="">По умолчанию</option></select></label>
+                <label class="sel">Режим <select id="selKeyType"><option value="">Умный режим</option></select></label>
+            </div>
+            <div class="row center">
+                <button id="btnDownload" class="ghost" title="Получить у провайдера свежий конфиг"><svg><use href="#i-refresh"/></svg>Обновить конфиг</button>
+                <button id="btnChange" class="ghost" title="Сервер назначает провайдер; другой можно запросить раз в сутки"><svg><use href="#i-swap"/></svg>Другой сервер</button>
+            </div>
+        </section>
+
+        <section id="tab-account" class="page hidden">
+            <div class="group">
+                <div class="gt">Профили</div>
+                <ul id="profList" class="list"></ul>
+                <div class="row">
+                    <input id="inpKey" class="grow mono" type="password" placeholder="Вставьте ключ vpn://…" autocomplete="off" spellcheck="false"/>
+                    <button id="btnSaveKey"><svg><use href="#i-plus"/></svg>Добавить</button>
+                </div>
+                <div class="row">
+                    <button id="btnImportFile" class="ghost"><svg><use href="#i-file"/></svg>Импорт .conf / .vpn</button>
+                    <button id="btnExport" class="ghost"><svg><use href="#i-save"/></svg>Экспорт .conf</button>
+                </div>
+                <div class="hint">Каждый ключ или конфиг — отдельный профиль. <span class="desk-only">Хранятся только на этом ПК, зашифрованы Windows DPAPI. Переключать можно и из трея.</span><span class="android-only">Хранятся только на этом телефоне, зашифрованы ключом из Android Keystore.</span></div>
+            </div>
+
+            <div class="group">
+                <div class="gt">Подписка</div>
+                <div id="keyInfo" class="hint mono-hint"></div>
+                <div id="account" class="card kv"></div>
+                <div class="row"><button id="btnRefresh" class="ghost"><svg><use href="#i-refresh"/></svg>Обновить статус</button></div>
+            </div>
+
+            <div class="group">
+                <div class="gt">Устройство</div>
+                <div id="devInfo" class="hint"></div>
+                <div class="row">
+                    <button id="btnDevNew" class="ghost">Новый ID устройства…</button>
+                    <button id="btnRebind" class="danger">Привязать ключ к этому устройству…</button>
+                </div>
+                <div class="hint">Провайдер привязывает ключ к устройству. Новый ID может занять ещё одно место из лимита.</div>
+            </div>
+        </section>
+
+        <section id="tab-split" class="page hidden">
+            <div class="group">
+                <div class="gt">Что идёт через VPN</div>
+                <div class="seg">
+                    <label><input type="radio" name="mode" value="full"/><span>Весь трафик</span></label>
+                    <label><input type="radio" name="mode" value="exclude"/><span>Кроме списка</span></label>
+                    <label><input type="radio" name="mode" value="include"/><span>Только список</span></label>
+                </div>
+                <label class="sw"><span><b>Россия мимо VPN</b><small id="russiaInfo">Российские сайты и сервисы напрямую (список сетей RIPE NCC, обновляется раз в неделю)</small></span><input id="chkRussia" type="checkbox"/><i></i></label>
+                <label class="sw"><span><b>Локальная сеть мимо VPN</b><small>192.168.x, 10.x и т.п.</small></span><input id="chkLan" type="checkbox"/><i></i></label>
+                <textarea id="txtEntries" rows="6" spellcheck="false" placeholder="Адреса, подсети и домены, по одному в строке&#10;example.com&#10;192.168.0.0/16"></textarea>
+                <div class="hint">Домены превращаются в IP при подключении. Kill switch действует только в режиме «Весь трафик».</div>
+            </div>
+
+            <div class="group android-only">
+                <div class="gt">Приложения</div>
+                <div class="seg">
+                    <label><input type="radio" name="appmode" value="all"/><span>Все</span></label>
+                    <label><input type="radio" name="appmode" value="include"/><span>Выбранные</span></label>
+                    <label><input type="radio" name="appmode" value="exclude"/><span>Кроме них</span></label>
+                </div>
+                <ul id="pkgList" class="list"></ul>
+                <div class="row"><button id="btnPickApps" class="ghost"><svg><use href="#i-plus"/></svg>Выбрать приложения</button></div>
+                <div id="appModeHint" class="hint"></div>
+            </div>
+
+            <div class="group desk-only">
+                <div class="gt">Программы только через VPN</div>
+                <ul id="appList" class="list"></ul>
+                <div class="row"><button id="btnAddApp" class="ghost"><svg><use href="#i-plus"/></svg>Добавить программу</button></div>
+                <div class="hint">Без VPN у этих программ нет сети совсем, в том числе на время переподключения. Правила держит служба, они действуют и при закрытом окне.</div>
+            </div>
+
+            <div class="savebar"><button id="btnSaveSplit"><svg><use href="#i-check"/></svg>Сохранить</button></div>
+        </section>
+
+        <section id="tab-stats" class="page hidden">
+            <div class="kpis">
+                <div class="card kpi"><div class="mk">Сегодня</div><div id="usToday" class="mv">—</div><div id="usTodaySub" class="hint"></div></div>
+                <div class="card kpi"><div class="mk">7 дней</div><div id="usWeek" class="mv">—</div><div id="usWeekSub" class="hint"></div></div>
+                <div class="card kpi"><div class="mk">Этот месяц</div><div id="usMonth" class="mv">—</div><div id="usMonthSub" class="hint"></div></div>
+                <div class="card kpi"><div class="mk">Всего</div><div id="usAll" class="mv">—</div><div id="usAllSub" class="hint"></div></div>
+            </div>
+            <div class="card chart">
+                <svg id="usChart" viewBox="0 0 600 140" preserveAspectRatio="none" aria-label="Трафик по дням за 30 дней"></svg>
+                <div class="legend"><span class="dot rx"></span>загрузка <span class="dot tx"></span>отдача <span class="grow"></span>30 дней · макс. <span id="usPeak">—</span></div>
+            </div>
+            <div class="row"><button id="btnResetUsage" class="ghost"><svg><use href="#i-trash"/></svg>Очистить статистику</button></div>
+
+            <div class="group flows">
+                <div class="gt">Кто передаёт трафик через VPN</div>
+                <label class="sw"><span><b>Записывать трафик по программам</b><small>Какая программа или приложение, куда и сколько отправили и получили. Журнал хранится только на этом устройстве</small></span><input id="chkFlows" type="checkbox"/><i></i></label>
+                <div id="flowBody" class="hidden">
+                    <div class="flowbar">
+                        <select id="flowDay" aria-label="День"></select>
+                        <div class="seg" id="flowSort">
+                            <label><input type="radio" name="flowsort" value="tx" checked/><span>↑ отдача</span></label>
+                            <label><input type="radio" name="flowsort" value="rx"/><span>↓ загрузка</span></label>
+                            <label><input type="radio" name="flowsort" value="all"/><span>всего</span></label>
+                        </div>
+                    </div>
+                    <div id="flowSum" class="hint"></div>
+                    <ul id="flowList" class="list flowlist"></ul>
+                    <div class="hint">Учитывается трафик внутри туннеля, без шифрования и служебных пакетов VPN, поэтому сумма немного меньше, чем в статистике выше. Имя сайта берётся из DNS-ответов и TLS, иначе показан IP-адрес.</div>
+                    <div class="row"><button id="btnFlowClear" class="ghost"><svg><use href="#i-trash"/></svg>Очистить журнал</button></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tab-settings" class="page hidden">
+            <div id="foot" class="about"></div>
+            <div class="group">
+                <div class="gt">Оформление</div>
+                <div class="skins" id="skins">
+                    <button class="skin" data-skin=""><i></i>Ночь</button>
+                    <button class="skin" data-skin="mint"><i></i>Мята</button>
+                    <button class="skin" data-skin="ocean"><i></i>Океан</button>
+                    <button class="skin" data-skin="coral"><i></i>Коралл</button>
+                    <button class="skin" data-skin="lavender"><i></i>Лаванда</button>
+                    <button class="skin" data-skin="lemon"><i></i>Лимон</button>
+                    <button class="skin" data-skin="graphite"><i></i>Графит</button>
+                    <button class="skin" data-skin="midnight"><i></i>Полночь</button>
+                    <button class="skin" data-skin="forest"><i></i>Лес</button>
+                    <button class="skin" data-skin="berry"><i></i>Малина</button>
+                    <button class="skin" data-skin="arctic"><i></i>Арктика</button>
+                </div>
+            </div>
+            <div class="group">
+                <div class="gt">Защита</div>
+                <div class="field android-only sysvpn"><span><b>Блокировать интернет без VPN</b><small>Постоянная VPN и блокировка подключений без VPN включаются в настройках Android</small></span><button id="btnSysVpn" class="ghost sm">Открыть</button></div>
+                <label class="sw desk-only"><span><b>Отключать интернет при обрыве VPN</b><small>Пока VPN не восстановится (пробуются и другие профили) или пока вы не нажмёте «Отключить»</small></span><input id="chkLockdown" type="checkbox"/><i></i></label>
+                <label class="sw desk-only"><span><b>Kill switch</b><small>Блокировать интернет мимо VPN, пока туннель включён</small></span><input id="chkKill" type="checkbox"/><i></i></label>
+                <label class="sw"><span><b>Блокировать IPv6</b><small>Защита от утечки мимо VPN</small></span><input id="chkIPv6" type="checkbox"/><i></i></label>
+                <label class="sw"><span><b>Автопереподключение</b><small>Если сервер не отвечает 3 минуты</small></span><input id="chkReconnect" type="checkbox"/><i></i></label>
+                <label class="sw"><span><b>Сам запрашивать другой сервер</b><small>Если не помогли переподключение и свежий конфиг (раз в сутки)</small></span><input id="chkAutoChange" type="checkbox"/><i></i></label>
+            </div>
+
+            <div class="group">
+                <div class="gt"><span class="desk-only">Запуск и окна</span><span class="android-only">Запуск</span></div>
+                <label class="sw desk-only"><span><b>Запускать вместе с Windows</b><small>Свёрнутым в трей</small></span><input id="chkAutostart" type="checkbox"/><i></i></label>
+                <label class="sw"><span><b>Подключаться при запуске</b></span><input id="chkAuto" type="checkbox"/><i></i></label>
+                <label class="sw desk-only"><span><b>Окошко статуса поверх окон</b><small>Зелёное — VPN работает, красное — связь прервана</small></span><input id="chkWidget" type="checkbox"/><i></i></label>
+                <label class="sw desk-only"><span><b>Закрытие сворачивает в трей</b><small>Выход — через меню значка в трее</small></span><input id="chkTray" type="checkbox"/><i></i></label>
+            </div>
+
+            <div class="group">
+                <div class="gt">Уведомления</div>
+                <label class="sw"><span><b>Уведомления</b><small>Потеря связи, восстановление, скорость в шторке</small></span><input id="chkNotify" type="checkbox"/><i></i></label>
+                <label class="sw"><span><b>Следить за подпиской</b><small>Проверка раз в 6 часов, предупреждение за 3 дня</small></span><input id="chkSubscription" type="checkbox"/><i></i></label>
+            </div>
+
+            <div class="group">
+                <div class="gt">Сеть</div>
+                <div class="field"><span>DNS</span>
+                    <select id="selDNS">
+                        <option value="provider">Провайдера (из конфига)</option>
+                        <option value="cloudflare">Cloudflare 1.1.1.1</option>
+                        <option value="quad9">Quad9 9.9.9.9</option>
+                        <option value="adguard">AdGuard (без рекламы)</option>
+                        <option value="custom">Свои серверы</option>
+                    </select>
+                </div>
+                <div class="field"><span>Свои DNS</span><input id="inpDNS" placeholder="1.1.1.1, 8.8.8.8"/></div>
+                <div class="field"><span>MTU <small>0 — из конфига</small></span><input id="inpMTU" type="number" min="0" max="1500"/></div>
+            </div>
+
+            <div class="savebar"><button id="btnSaveSettings"><svg><use href="#i-check"/></svg>Сохранить</button><span class="hint">Применится при следующем подключении</span></div>
+        </section>
+
+        <section id="tab-logs" class="page hidden">
+            <pre id="logs" class="logs"></pre>
+        </section>
+        </div>
+    </main>
+</div>
+
+<div id="banner" class="toast hidden"></div>
+
+<div id="picker" class="modal hidden">
+    <div class="sheet picker" role="dialog" aria-modal="true" aria-label="Выбор приложений">
+        <div class="mtitle">Приложения</div>
+        <input id="pkSearch" placeholder="Поиск" autocomplete="off"/>
+        <label class="sw pk-sys"><span><b>Показывать системные</b></span><input id="pkSystem" type="checkbox"/><i></i></label>
+        <ul id="pkAll" class="list pk-list"></ul>
+        <div class="mact"><button id="pkCancel" class="ghost">Отмена</button><button id="pkOk">Готово</button></div>
+    </div>
+</div>
+
+<div id="speedSheet" class="modal hidden">
+    <div class="sheet speed" role="dialog" aria-modal="true" aria-labelledby="stTitle">
+        <div id="stTitle" class="mtitle">Тест скорости через VPN</div>
+        <div id="stPhase" class="mtext">Подключение к серверу теста…</div>
+        <div class="st-gauge"><span id="stNow">—</span><small>Мбит/с</small></div>
+        <div class="st-rows">
+            <div><svg class="mi rx"><use href="#i-down"/></svg><span>Загрузка</span><b id="stDown">—</b></div>
+            <div><svg class="mi tx"><use href="#i-up"/></svg><span>Отдача</span><b id="stUp">—</b></div>
+            <div><svg class="mi ping"><use href="#i-pulse"/></svg><span>Пинг</span><b id="stPing">—</b></div>
+        </div>
+        <div id="stExit" class="st-exit"></div>
+        <div class="hint">Сервер теста — Cloudflare (speed.cloudflare.com). Тест расходует около 100–300 МБ трафика.</div>
+        <div class="mact"><button id="stClose" class="ghost">Закрыть</button><button id="stAgain"><svg><use href="#i-refresh"/></svg>Ещё раз</button></div>
+    </div>
+</div>
+
+<div id="modal" class="modal hidden">
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+        <div id="mTitle" class="mtitle"></div>
+        <div id="mText" class="mtext"></div>
+        <input id="mInput" class="hidden"/>
+        <div class="mact">
+            <button id="mCancel" class="ghost">Отмена</button>
+            <button id="mOk">OK</button>
+        </div>
+    </div>
+</div>
+<script src="./src/entry.ts" type="module"></script>
+</body>
+</html>

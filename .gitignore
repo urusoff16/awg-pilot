@@ -1,0 +1,8 @@
+build/bin
+build/android
+node_modules
+frontend/dist
+*.exe
+*.apk
+*.idsig
+build-log.txt
