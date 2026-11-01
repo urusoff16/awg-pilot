@@ -63,4 +63,11 @@ AWG Pilot is an independent project and is not affiliated with Amnezia, WireGuar
 
 ## License
 
-Not chosen yet: all rights reserved until the project is published.
+[PolyForm Strict 1.0.0](LICENSE.md). In short:
+
+- **allowed:** download and use it for personal noncommercial purposes (study, hobby, experiments) or within noncommercial organizations;
+- **not allowed:** selling it, building it into paid products or services, business use, changing the code and distributing copies, changed or not.
+
+The software comes as is, without any warranty. Official builds are published only in this repository's [Releases](../../releases). Third-party components keep their own licenses, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Required Notice: Copyright 2026 urusoff16 (https://github.com/urusoff16/awg-pilot)
