@@ -118,8 +118,13 @@ func TestCallDispatch(t *testing.T) {
 	if r := a.Call("RenameProfile", `["nope","x"]`); !strings.Contains(r, `"ok":false`) {
 		t.Fatalf("RenameProfile: %s", r)
 	}
+	a.Call("SetSystemLanguage", `["ru-RU"]`)
 	if r := a.Call("SaveSettings", `[{"app_mode":"include","app_packages":[]}]`); !strings.Contains(r, "выберите хотя бы одно") {
 		t.Fatalf("SaveSettings: %s", r)
+	}
+	a.Call("SetSystemLanguage", `["en-US"]`) // errors reach the page in the interface language
+	if r := a.Call("SaveSettings", `[{"app_mode":"include","app_packages":[]}]`); !strings.Contains(r, "choose at least one app") {
+		t.Fatalf("SaveSettings in English: %s", r)
 	}
 }
 

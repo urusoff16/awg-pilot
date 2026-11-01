@@ -9,6 +9,7 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"awgpilot/internal/health"
+	"awgpilot/internal/i18n"
 	"awgpilot/internal/tunnel"
 )
 
@@ -46,8 +47,8 @@ func (a *App) initNotifications() {
 	err := wruntime.RegisterNotificationCategory(a.ctx, wruntime.NotificationCategory{
 		ID: categoryServer,
 		Actions: []wruntime.NotificationAction{
-			{ID: actionChange, Title: "Запросить другой сервер"},
-			{ID: actionOpen, Title: "Открыть"},
+			{ID: actionChange, Title: i18n.T("Запросить другой сервер")},
+			{ID: actionOpen, Title: i18n.T("Открыть")},
 		},
 	})
 	if err != nil {
@@ -79,7 +80,7 @@ func (a *App) notify(title, body, category string) {
 	if !on || a.ctx == nil {
 		return
 	}
-	opts := wruntime.NotificationOptions{ID: fmt.Sprintf("awgpilot-%d", time.Now().UnixNano()), Title: title, Body: body, CategoryID: category}
+	opts := wruntime.NotificationOptions{ID: fmt.Sprintf("awgpilot-%d", time.Now().UnixNano()), Title: i18n.T(title), Body: i18n.T(body), CategoryID: category}
 	var err error
 	if category != "" {
 		err = wruntime.SendNotificationWithActions(a.ctx, opts)
@@ -205,7 +206,7 @@ func (a *App) updateTray(st tunnel.Stats) {
 			tip = "AWG Pilot — нет ответа от сервера"
 		}
 	}
-	a.tray.SetState(up, tip)
+	a.tray.SetState(up, i18n.T(tip))
 }
 
 func humanBytes(v float64) string {

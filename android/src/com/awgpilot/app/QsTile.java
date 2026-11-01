@@ -38,7 +38,7 @@ public final class QsTile extends TileService {
             if (t == null) return;
             t.setState(on ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
             t.setLabel(getString(R.string.app_name));
-            if (Build.VERSION.SDK_INT >= 29) t.setSubtitle(on ? subtitle : "Выключен");
+            if (Build.VERSION.SDK_INT >= 29) t.setSubtitle(on ? subtitle : Core.t("Выключен", "Off"));
             t.updateTile();
         });
     }

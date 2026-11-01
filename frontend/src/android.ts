@@ -12,7 +12,7 @@ export function installAndroidBridge() {
         if (!p) return;
         pending.delete(id);
         let r: any;
-        try { r = JSON.parse(json); } catch { r = {ok: false, error: 'неверный ответ ядра'}; }
+        try { r = JSON.parse(json); } catch { r = {ok: false, error: 'invalid core reply'}; }
         if (r.ok) p.resolve(r.result); else p.reject(new Error(r.error));
     };
     const call = (method: string, args: unknown[]) => new Promise((resolve, reject) => {

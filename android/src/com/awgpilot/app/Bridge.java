@@ -35,7 +35,7 @@ final class Bridge {
                 case "Connect":
                     act.withVpnConsent(granted -> Core.IO.execute(() -> act.reply(id, granted
                             ? Core.call("Connect")
-                            : err("Без разрешения Android на VPN подключиться нельзя"))));
+                            : err(Core.t("Без разрешения Android на VPN подключиться нельзя", "Without Android's VPN permission the app cannot connect")))));
                     return;
                 case "ImportConfigFile":
                     act.pickConfig((text, name) -> Core.IO.execute(() -> act.reply(id, text == null ? ok()
@@ -66,6 +66,12 @@ final class Bridge {
                 case "ShowWindow":
                     act.reply(id, ok()); // desktop-only features
                     return;
+                case "SetLanguage": {
+                    String r = Core.call(method, args);
+                    Core.setLang(r);
+                    act.reply(id, r);
+                    return;
+                }
                 default:
                     act.reply(id, Core.call(method, args));
             }
@@ -97,7 +103,7 @@ final class Bridge {
         try {
             return new JSONObject().put("ok", false).put("error", msg).toString();
         } catch (Exception e) {
-            return "{\"ok\":false,\"error\":\"ошибка\"}";
+            return "{\"ok\":false,\"error\":\"error\"}";
         }
     }
 }

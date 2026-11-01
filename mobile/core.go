@@ -21,6 +21,7 @@ import (
 	"awgpilot/internal/awgconf"
 	"awgpilot/internal/flows"
 	"awgpilot/internal/geoip"
+	"awgpilot/internal/i18n"
 	"awgpilot/internal/keyapi"
 	"awgpilot/internal/netstat"
 	"awgpilot/internal/netx"
@@ -32,7 +33,7 @@ import (
 	"awgpilot/internal/vpnkey"
 )
 
-const appVersion = "0.9.0"
+const appVersion = "0.9.1"
 
 var dnsPresets = map[string][]string{
 	"cloudflare": {"1.1.1.1", "1.0.0.1"},
@@ -110,6 +111,7 @@ type App struct {
 	rec          recovery
 	usage        *usage.Store
 	flows        *flows.Recorder // per-app traffic log
+	sysLang      string          // Android's language, from Java
 	russiaStatus string
 	speed        speedtest.Tracker
 
@@ -126,6 +128,7 @@ func newApp(plat Platform, dir string, sdk int, trace func(string)) (*App, error
 	}
 	a.st = st
 	a.settings, err = st.LoadSettings()
+	i18n.SetLanguage(i18n.Resolve(a.settings.Language, a.sysLang))
 	if err != nil {
 		a.logf("настройки повреждены, использую значения по умолчанию: %v", err)
 	}
@@ -259,6 +262,7 @@ type State struct {
 	RussiaList   string                 `json:"russia_list"`
 	SDK          int                    `json:"sdk"`
 	SpeedTest    speedtest.State        `json:"speedtest"`
+	Lang         string                 `json:"lang"` // interface language in effect: "ru" or "en"
 }
 
 type ProfileInfo struct {
@@ -325,8 +329,25 @@ func (a *App) GetState() State {
 	if !st.Up {
 		s.Speed = SpeedInfo{PingMs: -1}
 	}
-	s.Alert = a.alert.Load()
+	if al := a.alert.Load(); al != nil {
+		c := *al
+		c.Message = i18n.T(c.Message)
+		s.Alert = &c
+	}
 	s.SpeedTest = a.speed.Snapshot()
+	s.SpeedTest.Error = i18n.T(s.SpeedTest.Error)
+	s.Lang = i18n.Lang()
+	s.RussiaList = i18n.T(s.RussiaList)
+	for i := range s.Profiles {
+		s.Profiles[i].ConfigFor = i18n.T(s.Profiles[i].ConfigFor)
+	}
+	if len(s.Warnings) > 0 {
+		w := make([]string, len(s.Warnings))
+		for i, x := range s.Warnings {
+			w[i] = i18n.T(x)
+		}
+		s.Warnings = w
+	}
 	if a.key != nil {
 		s.MaskedKey, s.APIEndpoint = a.key.Masked(), a.key.APIEndpoint
 	}
@@ -381,10 +402,39 @@ func (a *App) Brief() Brief {
 	default:
 		b.Title = "VPN отключён"
 	}
+	b.Title = i18n.T(b.Title)
 	return b
 }
 
-func (a *App) GetLogs() []string { return a.logs.Lines() }
+func (a *App) GetLogs() []string {
+	lines := a.logs.Lines()
+	if i18n.English() {
+		for i, l := range lines {
+			lines[i] = i18n.T(l)
+		}
+	}
+	return lines
+}
+
+// SetLanguage switches the interface language: "" follows Android, "ru" or "en".
+func (a *App) SetLanguage(lang string) {
+	a.mu.Lock()
+	a.settings.Language = lang
+	a.saveSettings()
+	sys := a.sysLang
+	a.mu.Unlock()
+	i18n.SetLanguage(i18n.Resolve(lang, sys))
+}
+
+// SetSystemLanguage takes Android's language (Java passes it right after the core starts).
+func (a *App) SetSystemLanguage(tag string) string {
+	a.mu.Lock()
+	a.sysLang = tag
+	setting := a.settings.Language
+	a.mu.Unlock()
+	i18n.SetLanguage(i18n.Resolve(setting, tag))
+	return i18n.Lang()
+}
 
 // SpeedTest measures download and upload through the tunnel (Cloudflare speed test servers).
 func (a *App) SpeedTest() error {
@@ -1141,7 +1191,7 @@ func (a *App) notify(title, body string) {
 	on := a.settings.Notifications
 	a.mu.Unlock()
 	if on {
-		a.plat.Notify(title, body)
+		a.plat.Notify(i18n.T(title), i18n.T(body))
 	}
 }
 
@@ -1187,7 +1237,20 @@ func (a *App) Call(method, args string) string {
 	case "ResetUsage":
 		return reply(nil, a.ResetUsage())
 	case "TrafficLog":
-		return reply(a.flows.Report(str(0)), nil)
+		rep := a.flows.Report(str(0))
+		for i := range rep.Rows {
+			rep.Rows[i].App, rep.Rows[i].Host = i18n.T(rep.Rows[i].App), i18n.T(rep.Rows[i].Host)
+		}
+		return reply(rep, nil)
+	case "Translate":
+		return reply(i18n.T(str(0)), nil)
+	case "SetLanguage":
+		a.SetLanguage(str(0))
+		return reply(i18n.Lang(), nil)
+	case "SetSystemLanguage":
+		return reply(a.SetSystemLanguage(str(0)), nil)
+	case "Lang":
+		return reply(i18n.Lang(), nil)
 	case "SetSkin":
 		a.mu.Lock()
 		a.settings.Skin = str(0)
@@ -1258,7 +1321,7 @@ func (a *App) Call(method, args string) string {
 func reply(v any, err error) string {
 	var b []byte
 	if err != nil {
-		b, _ = json.Marshal(map[string]any{"ok": false, "error": err.Error()})
+		b, _ = json.Marshal(map[string]any{"ok": false, "error": i18n.T(err.Error())})
 	} else {
 		b, _ = json.Marshal(map[string]any{"ok": true, "result": v})
 	}

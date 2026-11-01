@@ -41,8 +41,10 @@ type Settings struct {
 	LockdownOnDrop bool `json:"lockdown_on_drop"`
 	// ShowWidget shows the small always-on-top status window.
 	ShowWidget bool `json:"show_widget"`
-	// Skin is the colour theme of the window: "" (dark), mint, ocean, sunset or neon.
+	// Skin is the colour theme of the window: "" (dark) or one of the flat skins.
 	Skin string `json:"skin"`
+	// Language of the interface: "" follows the system (Russian only on Russian systems), "ru", "en".
+	Language string `json:"language"`
 	// AppMode and AppPackages are Android's per-app split: "all" (every app through the VPN),
 	// "include" (only AppPackages) or "exclude" (all except AppPackages).
 	AppMode     string   `json:"app_mode"`

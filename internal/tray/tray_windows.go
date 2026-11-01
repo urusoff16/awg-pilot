@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"fyne.io/systray"
+
+	"awgpilot/internal/i18n"
 )
 
 type Callbacks struct {
@@ -29,6 +31,8 @@ type Tray struct {
 	ready     bool
 	connected bool
 	tooltip   string
+	open      *systray.MenuItem
+	quit      *systray.MenuItem
 	toggle    *systray.MenuItem
 	widget    *systray.MenuItem
 	widgetOn  bool
@@ -46,7 +50,7 @@ func Start(cb Callbacks) *Tray {
 	t := &Tray{
 		iconOn:  circleICO(color.RGBA{63, 182, 139, 255}),
 		iconOff: circleICO(color.RGBA{128, 138, 150, 255}),
-		tooltip: "AWG Pilot — отключено",
+		tooltip: i18n.T("AWG Pilot — отключено"),
 	}
 	go func() {
 		runtime.LockOSThread()
@@ -60,10 +64,11 @@ func (t *Tray) onReady(cb Callbacks) {
 	systray.SetTooltip(t.tooltip)
 	systray.SetOnTapped(cb.Show)
 
-	open := systray.AddMenuItem("Открыть AWG Pilot", "")
+	open := systray.AddMenuItem(i18n.T("Открыть AWG Pilot"), "")
 	t.mu.Lock()
-	t.toggle = systray.AddMenuItem("Подключить", "")
-	t.widget = systray.AddMenuItemCheckbox("Окошко статуса", "Маленькое окно поверх других: зелёное — работает, красное — связь прервана", false)
+	t.open = open
+	t.toggle = systray.AddMenuItem(i18n.T("Подключить"), "")
+	t.widget = systray.AddMenuItemCheckbox(i18n.T("Окошко статуса"), i18n.T("Маленькое окно поверх других: зелёное — работает, красное — связь прервана"), false)
 	go func() {
 		for range t.widget.ClickedCh {
 			if cb.ToggleWidget != nil {
@@ -71,7 +76,7 @@ func (t *Tray) onReady(cb Callbacks) {
 			}
 		}
 	}()
-	t.profMenu = systray.AddMenuItem("Профиль", "Переключить ключ или конфиг")
+	t.profMenu = systray.AddMenuItem(i18n.T("Профиль"), i18n.T("Переключить ключ или конфиг"))
 	for i := 0; i < maxProfiles; i++ {
 		it := t.profMenu.AddSubMenuItemCheckbox("", "", false)
 		it.Hide()
@@ -86,9 +91,10 @@ func (t *Tray) onReady(cb Callbacks) {
 	}
 	t.mu.Unlock()
 	systray.AddSeparator()
-	quit := systray.AddMenuItem("Выход", "Отключить VPN и закрыть программу")
+	quit := systray.AddMenuItem(i18n.T("Выход"), i18n.T("Отключить VPN и закрыть программу"))
 
 	t.mu.Lock()
+	t.quit = quit
 	t.ready = true
 	t.applyLocked()
 	t.applyProfilesLocked()
@@ -175,12 +181,29 @@ func (t *Tray) applyProfilesLocked() {
 func (t *Tray) applyLocked() {
 	if t.connected {
 		systray.SetIcon(t.iconOn)
-		t.toggle.SetTitle("Отключить")
+		t.toggle.SetTitle(i18n.T("Отключить"))
 	} else {
 		systray.SetIcon(t.iconOff)
-		t.toggle.SetTitle("Подключить")
+		t.toggle.SetTitle(i18n.T("Подключить"))
 	}
 	systray.SetTooltip(t.tooltip)
+}
+
+// Retitle shows the menu in the current language.
+func (t *Tray) Retitle() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.ready {
+		return
+	}
+	t.open.SetTitle(i18n.T("Открыть AWG Pilot"))
+	t.widget.SetTitle(i18n.T("Окошко статуса"))
+	t.widget.SetTooltip(i18n.T("Маленькое окно поверх других: зелёное — работает, красное — связь прервана"))
+	t.profMenu.SetTitle(i18n.T("Профиль"))
+	t.profMenu.SetTooltip(i18n.T("Переключить ключ или конфиг"))
+	t.quit.SetTitle(i18n.T("Выход"))
+	t.quit.SetTooltip(i18n.T("Отключить VPN и закрыть программу"))
+	t.applyLocked()
 }
 
 func (t *Tray) Close() { systray.Quit() }

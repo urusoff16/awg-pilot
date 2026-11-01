@@ -4,7 +4,7 @@
 
 [Русская версия](README.md) · [Download](../../releases/latest)
 
-![AWG Pilot on Windows](docs/screenshots/main.jpg)
+![AWG Pilot on Windows](docs/screenshots/en/main.jpg)
 
 ## Features
 
@@ -25,10 +25,11 @@
 
 **Look**
 - 11 colour themes: the default dark one plus 10 flat two-colour skins.
+- English and Russian interface: the language follows the system (Russian on Russian Windows and Android, English elsewhere) and switches with the EN/RU button.
 
-![Traffic by program](docs/screenshots/traffic.jpg)
+![Traffic by program](docs/screenshots/en/traffic.jpg)
 
-![Colour themes](docs/screenshots/skins.png)
+![Colour themes](docs/screenshots/en/skins.png)
 
 ## Install
 
@@ -43,8 +44,6 @@ Download the files from [Releases](../../releases/latest).
 1. Turn off any other VPN client that uses the same key: two clients with one key revoke each other's configs.
 2. Open AWG Pilot → **Keys and profiles** → paste a key or import a `.vpn` / `.conf` file.
 3. Press the power button. The status window and the traffic log are in **Settings** and **Statistics**.
-
-The interface is in Russian.
 
 ## How it works
 

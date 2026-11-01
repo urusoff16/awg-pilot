@@ -4,7 +4,7 @@
 
 [English version](README.en.md) · [Скачать](../../releases/latest)
 
-![AWG Pilot в Windows](docs/screenshots/main.jpg)
+![AWG Pilot в Windows](docs/screenshots/ru/main.jpg)
 
 ## Возможности
 
@@ -25,10 +25,11 @@
 
 **Оформление**
 - 11 тем: тёмная по умолчанию и 10 плоских двухцветных.
+- Интерфейс на русском и английском: язык выбирается по системе (русский для русской Windows и Android, английский для остальных), переключается кнопкой EN/RU.
 
-![Трафик по программам](docs/screenshots/traffic.jpg)
+![Трафик по программам](docs/screenshots/ru/traffic.jpg)
 
-![Темы оформления](docs/screenshots/skins.png)
+![Темы оформления](docs/screenshots/ru/skins.png)
 
 ## Установка
 

@@ -1,9 +1,13 @@
 import './style.css';
 import * as Go from '../wailsjs/go/main/App';
+import {t as tr, tf, lang, setLang, locale, translateDom, units, perSec, plural} from './i18n';
 
 type AnyObj = Record<string, any>;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+// The language remembered from the last run paints the first frame; the core's choice wins below.
+setLang(lang);
+translateDom(document.body);
 let state: AnyObj = {};
 let busy = false;
 let settingsDirty = false;
@@ -50,7 +54,14 @@ function ask(title: string, text: string, opts: {ok?: string, danger?: boolean, 
         };
     });
 }
-const confirmed = async (title: string, text: string, ok: string, danger = false) => (await ask(title, text, {ok, danger})) !== null;
+const confirmed = async (title: string, text: string, ok: string, danger = false) => (await ask(tr(title), tr(text), {ok: tr(ok), danger})) !== null;
+
+// errText shows an error from the core in the interface language (Windows passes them in Russian).
+async function errText(e: any): Promise<string> {
+    const msg = String(e?.message ?? e);
+    if (lang !== 'en' || !/[\u0400-\u04ff]/.test(msg)) return msg;
+    try { return await (window as any).go.main.App.Translate(msg); } catch { return msg; }
+}
 
 async function run(label: string, fn: () => Promise<unknown>, okMsg?: string) {
     if (busy) return;
@@ -58,9 +69,9 @@ async function run(label: string, fn: () => Promise<unknown>, okMsg?: string) {
     document.body.classList.add('busy');
     try {
         await fn();
-        if (okMsg) banner(okMsg, 'ok');
+        if (okMsg) banner(tr(okMsg), 'ok');
     } catch (e: any) {
-        banner(`${label}: ${e?.message ?? e}`);
+        banner(`${tr(label)}: ${await errText(e)}`);
     } finally {
         busy = false;
         document.body.classList.remove('busy');
@@ -69,18 +80,18 @@ async function run(label: string, fn: () => Promise<unknown>, okMsg?: string) {
 }
 
 const bytes = (n: number) => {
-    if (!n) return '0 Б';
-    const u = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+    const u = units();
+    if (!n) return `0 ${u[0]}`;
     const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
     return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`;
 };
 
 const ago = (iso?: string) => {
-    if (!iso || iso.startsWith('0001')) return 'ещё не было';
+    if (!iso || iso.startsWith('0001')) return tr('ещё не было');
     const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
-    if (s < 60) return `${s} с назад`;
-    if (s < 3600) return `${Math.floor(s / 60)} мин назад`;
-    return `${Math.floor(s / 3600)} ч назад`;
+    if (s < 60) return tf('{0} с назад', s);
+    if (s < 3600) return tf('{0} мин назад', Math.floor(s / 60));
+    return tf('{0} ч назад', Math.floor(s / 3600));
 };
 
 const duration = (iso?: string) => {
@@ -102,47 +113,47 @@ function render() {
     document.body.classList.toggle('pending', !!t.up && !handshakeOk);
     document.body.classList.toggle('blocked', !!t.blocked);
 
-    $('statusTitle').textContent = handshakeOk ? 'Подключено' : t.up ? 'Подключение…' : t.blocked ? 'Интернет заблокирован' : 'Отключено';
-    $('pillText').textContent = handshakeOk ? 'Защищено' : t.up ? 'Подключение…' : t.blocked ? 'Интернет закрыт' : 'Не защищено';
+    $('statusTitle').textContent = tr(handshakeOk ? 'Подключено' : t.up ? 'Подключение…' : t.blocked ? 'Интернет заблокирован' : 'Отключено');
+    $('pillText').textContent = tr(handshakeOk ? 'Защищено' : t.up ? 'Подключение…' : t.blocked ? 'Интернет закрыт' : 'Не защищено');
     const active = (state.profiles ?? []).find((p: AnyObj) => p.id === state.active_id);
     $('statusSub').textContent = !state.service_ok
-        ? 'Служба «AWG Pilot VPN» не запущена — переустановите программу'
-        : !active ? 'Добавьте ключ или .conf на вкладке «Профили и ключи»'
-        : !state.has_config ? `Профиль «${active.name}»: нет конфига — нажмите «Обновить конфиг»`
-        : t.up && !handshakeOk ? 'Ожидание ответа сервера…'
-        : `Профиль «${active.name}»` + (t.up && t.endpoint ? ` · ${t.endpoint.replace(/:\d+$/, '')}` : '');
+        ? tr('Служба «AWG Pilot VPN» не запущена — переустановите программу')
+        : !active ? tr('Добавьте ключ или .conf на вкладке «Профили и ключи»')
+        : !state.has_config ? tf('Профиль «{0}»: нет конфига — нажмите «Обновить конфиг»', active.name)
+        : t.up && !handshakeOk ? tr('Ожидание ответа сервера…')
+        : tf('Профиль «{0}»', active.name) + (t.up && t.endpoint ? ` · ${t.endpoint.replace(/:\d+$/, '')}` : '');
 
     $('stEndpoint').textContent = t.endpoint || state.config_info?.endpoint || '—';
     $('stHandshake').textContent = t.up ? ago(t.last_handshake) : '—';
     $('stTraffic').textContent = t.up ? `${bytes(t.rx_bytes)} / ${bytes(t.tx_bytes)}` : '—';
     $('stUptime').textContent = t.up ? duration(t.since) : '00:00:00';
     const splitActive = (s.split?.mode && s.split.mode !== 'full') || s.split?.bypass_lan || s.split?.bypass_russia;
-    $('stKill').textContent = t.up ? (t.kill_switch ? 'активен' : (s.kill_switch && splitActive ? 'не при сплите' : 'выключен'))
-        : !s.kill_switch ? 'выключен' : splitActive ? 'не при сплите' : 'при подключении';
+    $('stKill').textContent = tr(t.up ? (t.kill_switch ? 'активен' : (s.kill_switch && splitActive ? 'не при сплите' : 'выключен'))
+        : !s.kill_switch ? 'выключен' : splitActive ? 'не при сплите' : 'при подключении');
     const modeName: AnyObj = {full: 'весь трафик', exclude: 'кроме списка', include: 'только список'};
-    const routing = (modeName[s.split?.mode] ?? 'весь трафик')
-        + (s.split?.bypass_russia && s.split?.mode !== 'include' ? ', РФ напрямую' : '')
+    const routing = tr(modeName[s.split?.mode] ?? 'весь трафик')
+        + (s.split?.bypass_russia && s.split?.mode !== 'include' ? tr(', РФ напрямую') : '')
         + (s.split?.bypass_lan ? ', LAN' : '');
     $('stRouting').textContent = routing;
     $('stRouting').title = routing;
-    if (state.russia_list) $('russiaInfo').textContent = `Российские сайты и сервисы напрямую. Список RIPE NCC: ${state.russia_list}, обновляется раз в неделю`;
+    if (state.russia_list) $('russiaInfo').textContent = tf('Российские сайты и сервисы напрямую. Список RIPE NCC: {0}, обновляется раз в неделю', state.russia_list);
     renderProfiles(active);
     renderUsage(state.usage);
-    $('stIPv6').textContent = t.up ? (t.ipv6_blocked ? 'заблокирован' : (t.kill_switch ? 'закрыт' : 'не изменён')) : (s.block_ipv6 ? 'будет закрыт' : 'не изменяется');
+    $('stIPv6').textContent = tr(t.up ? (t.ipv6_blocked ? 'заблокирован' : (t.kill_switch ? 'закрыт' : 'не изменён')) : (s.block_ipv6 ? 'будет закрыт' : 'не изменяется'));
     const nApps = (s.vpn_only_apps ?? []).length;
-    $('stApps').textContent = !nApps ? 'нет' : t.up ? `${nApps} — через туннель` : `${nApps} — без сети до подключения`;
+    $('stApps').textContent = !nApps ? tr('нет') : t.up ? tf('{0} — через туннель', nApps) : tf('{0} — без сети до подключения', nApps);
     if (android) {
         const nPkg = (s.app_packages ?? []).length;
-        $('stAppsK').textContent = 'Приложения';
-        $('stApps').textContent = s.app_mode === 'include' ? `${nPkg} через VPN, остальные напрямую`
-            : s.app_mode === 'exclude' && nPkg ? `все, кроме ${nPkg}` : 'все через VPN';
+        $('stAppsK').textContent = tr('Приложения');
+        $('stApps').textContent = s.app_mode === 'include' ? tf('{0} через VPN, остальные напрямую', nPkg)
+            : s.app_mode === 'exclude' && nPkg ? tf('все, кроме {0}', nPkg) : tr('все через VPN');
     }
 
     renderSpeed(t.up ? state.speed : null);
     const al = t.blocked
-        ? {message: 'VPN оборвался — интернет закрыт, чтобы ничего не ушло мимо VPN. Восстанавливаю подключение, пробую другие профили.', action: 'unlock'}
+        ? {message: tr('VPN оборвался — интернет закрыт, чтобы ничего не ушло мимо VPN. Восстанавливаю подключение, пробую другие профили.'), action: 'unlock'}
         : state.other_vpn
-            ? {message: `Трафик идёт через другой VPN (адаптер «${state.other_vpn}»), а не через AWG Pilot. Отключите его, например AmneziaVPN.`, action: ''}
+            ? {message: tf('Трафик идёт через другой VPN (адаптер «{0}»), а не через AWG Pilot. Отключите его, например AmneziaVPN.', state.other_vpn), action: ''}
             : state.alert;
     $('alert').classList.toggle('hidden', !al);
     if (al) {
@@ -153,13 +164,13 @@ function render() {
     }
 
     const ci = state.config_info;
-    $('stEndpoint').title = ci ? `Адрес ${(ci.address ?? []).join(', ')}\nDNS ${(ci.dns ?? []).join(', ')}\nMTU ${ci.mtu} · ${ci.awg}` : '';
+    $('stEndpoint').title = ci ? `${tr('Адрес')} ${(ci.address ?? []).join(', ')}\nDNS ${(ci.dns ?? []).join(', ')}\nMTU ${ci.mtu} · ${ci.awg}` : '';
 
     // countries / connection types
     const selC = $<HTMLSelectElement>('selCountry');
     const countries: AnyObj[] = state.countries ?? [];
     if (selC.options.length - 1 !== countries.length) {
-        selC.innerHTML = '<option value="">По умолчанию</option>' + countries.map(c => `<option value="${esc(c.iso_country_code)}">${esc(c.country_label)}</option>`).join('');
+        selC.innerHTML = `<option value="">${tr('По умолчанию')}</option>` + countries.map(c => `<option value="${esc(c.iso_country_code)}">${esc(c.country_label)}</option>`).join('');
     }
     if (document.activeElement !== selC) selC.value = s.country ?? '';
     // Some providers assign the server themselves; then there is nothing to choose.
@@ -176,35 +187,35 @@ function render() {
     selK.closest('label')!.classList.toggle('hidden', conns.length <= 1);
 
     // account
-    $('keyInfo').textContent = state.has_key ? `Ключ ${state.masked_key} → ${state.api_endpoint}` : 'У активного профиля нет ключа vpn:// — статус подписки недоступен.';
+    $('keyInfo').textContent = state.has_key ? tf('Ключ {0} → {1}', state.masked_key, state.api_endpoint) : tr('У активного профиля нет ключа vpn:// — статус подписки недоступен.');
     const a = state.account;
     $('account').innerHTML = a ? [
-        ['Статус', a.simplified_status],
-        ['Оплачено до', a.paid_until ? new Date(a.paid_until).toLocaleDateString('ru-RU') : '—'],
-        ['Устройства', `${a.number_of_available_keys} своб. из ${a.key_limit}`],
-        ['Автопродление', a.auto_renewal ? 'да' : 'нет'],
-        ...(a.alias ? [['Название', a.alias]] : []),
+        [tr('Статус'), a.simplified_status],
+        [tr('Оплачено до'), a.paid_until ? new Date(a.paid_until).toLocaleDateString(locale()) : '—'],
+        [tr('Устройства'), tf('{0} своб. из {1}', a.number_of_available_keys, a.key_limit)],
+        [tr('Автопродление'), tr(a.auto_renewal ? 'да' : 'нет')],
+        ...(a.alias ? [[tr('Название'), a.alias]] : []),
     ].map(([k, v]) => `<div><span>${esc(k)}</span><b title="${esc(v)}">${esc(v)}</b></div>`).join('') : '';
-    if (state.has_key && !a) $('keyInfo').textContent += ' · нажмите «Обновить статус»';
+    if (state.has_key && !a) $('keyInfo').textContent += tr(' · нажмите «Обновить статус»');
 
-    $('foot').textContent = `AWG Pilot ${state.version ?? ''} · движок AmneziaWG 3.1${state.service_ok ? '' : ' · служба не запущена'}`;
+    $('foot').textContent = tf('AWG Pilot {0} · движок AmneziaWG 3.1', state.version ?? '') + (state.service_ok ? '' : tr(' · служба не запущена'));
     $('railVer').textContent = state.version ? `v${state.version}` : '';
     $('logo').title = `AWG Pilot v${state.version ?? ''}`;
     const devText: AnyObj = {saved: 'сохранён', generated: 'создан в AWG Pilot'};
-    $('devInfo').textContent = state.device_source ? `ID устройства: ${devText[state.device_source] ?? state.device_source}`
-        : 'ID устройства не выбран — без него запросы к провайдеру не отправляются.';
+    $('devInfo').textContent = state.device_source ? tf('ID устройства: {0}', tr(devText[state.device_source] ?? state.device_source))
+        : tr('ID устройства не выбран — без него запросы к провайдеру не отправляются.');
 
     if (!settingsDirty) fillSettings(s);
     $<HTMLInputElement>('chkAutostart').checked = !!state.autostart;
     if (document.activeElement !== $('chkWidget')) $<HTMLInputElement>('chkWidget').checked = !!s.show_widget;
 }
 
-const rate = (bps: number) => `${bytes(bps)}/с`;
+const rate = (bps: number) => `${bytes(bps)}${perSec()}`;
 
 function renderSpeed(sp: AnyObj | null) {
     $('spRx').textContent = sp ? rate(sp.rx_bps) : '—';
     $('spTx').textContent = sp ? rate(sp.tx_bps) : '—';
-    $('spPing').textContent = !sp ? '—' : sp.ping_ms >= 0 ? `${sp.ping_ms} мс` : 'нет ответа';
+    $('spPing').textContent = !sp ? '—' : sp.ping_ms >= 0 ? tf('{0} мс', sp.ping_ms) : tr('нет ответа');
     const hist: AnyObj[] = sp?.history ?? [];
     const W = 600, H = 90, N = 120;
     const peak = Math.max(1, ...hist.map(p => Math.max(p.rx, p.tx)));
@@ -226,18 +237,18 @@ function renderProfiles(active: AnyObj | undefined) {
     if (sig === profSig) return; // keep focus/hover stable between polls
     profSig = sig;
     const ic = (name: string) => `<svg><use href="#i-${name}"/></svg>`;
-    $('profList').innerHTML = !list.length ? '<li class="empty">Профилей пока нет — вставьте ключ vpn:// или импортируйте .conf</li>'
+    $('profList').innerHTML = !list.length ? `<li class="empty">${tr('Профилей пока нет — вставьте ключ vpn:// или импортируйте .conf')}</li>`
         : list.map(p => {
-            const what = [p.has_key ? `ключ ${esc(p.masked_key)}` : '', p.has_config ? `конфиг: ${esc(p.config_for || 'есть')}` : 'нет конфига'].filter(Boolean).join(' · ');
+            const what = [p.has_key ? tf('ключ {0}', esc(p.masked_key)) : '', p.has_config ? tf('конфиг: {0}', esc(p.config_for || tr('есть'))) : tr('нет конфига')].filter(Boolean).join(' · ');
             const isActive = active && p.id === active.id;
             const id = esc(p.id);
             return `<li class="${isActive ? 'active' : ''}">
                 <svg class="li-ic"><use href="#i-${p.has_key ? 'key' : 'file'}"/></svg>
                 <span class="li-main"><span class="li-name">${esc(p.name)}</span><span class="li-sub" title="${what}">${what}</span></span>
                 <span class="li-act">
-                    ${isActive ? '<span class="badge">активный</span>' : `<button class="icon ok" data-act="use" data-id="${id}" data-tip="Сделать активным" aria-label="Сделать активным">${ic('check')}</button>`}
-                    <button class="icon" data-act="rename" data-id="${id}" data-tip="Переименовать" aria-label="Переименовать">${ic('edit')}</button>
-                    <button class="icon del" data-act="delete" data-id="${id}" data-tip="Удалить" aria-label="Удалить">${ic('trash')}</button>
+                    ${isActive ? `<span class="badge">${tr('активный')}</span>` : `<button class="icon ok" data-act="use" data-id="${id}" data-tip="${tr('Сделать активным')}" aria-label="${tr('Сделать активным')}">${ic('check')}</button>`}
+                    <button class="icon" data-act="rename" data-id="${id}" data-tip="${tr('Переименовать')}" aria-label="${tr('Переименовать')}">${ic('edit')}</button>
+                    <button class="icon del" data-act="delete" data-id="${id}" data-tip="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ic('trash')}</button>
                 </span></li>`;
         }).join('');
 }
@@ -248,14 +259,14 @@ function renderUsage(u: AnyObj | undefined) {
     $('usToday').textContent = pair(u?.today); $('usTodaySub').textContent = sub(u?.today);
     $('usWeek').textContent = pair(u?.week); $('usWeekSub').textContent = sub(u?.week);
     $('usMonth').textContent = pair(u?.month); $('usMonthSub').textContent = sub(u?.month);
-    $('usAll').textContent = pair(u?.all); $('usAllSub').textContent = u?.since ? `с ${new Date(u.since).toLocaleDateString('ru-RU')}` : '';
+    $('usAll').textContent = pair(u?.all); $('usAllSub').textContent = u?.since ? tf('с {0}', new Date(u.since).toLocaleDateString(locale())) : '';
     const days: AnyObj[] = u?.last30 ?? [];
     const W = 600, H = 140, bw = W / 30;
     const peak = Math.max(1, ...days.map(d => d.rx + d.tx));
     $('usChart').innerHTML = days.map((d, i) => {
         const hRx = (H - 14) * d.rx / peak, hTx = (H - 14) * d.tx / peak;
         const x = i * bw + 2, w = bw - 4;
-        const title = `${new Date(d.date).toLocaleDateString('ru-RU')}: ↓ ${bytes(d.rx)}, ↑ ${bytes(d.tx)}`;
+        const title = `${new Date(d.date).toLocaleDateString(locale())}: ↓ ${bytes(d.rx)}, ↑ ${bytes(d.tx)}`;
         return `<g><title>${esc(title)}</title>`
             + `<rect x="${x}" y="${H - hRx - hTx}" width="${w}" height="${hRx}" rx="2" class="bar-rx"/>`
             + `<rect x="${x}" y="${H - hTx}" width="${w}" height="${hTx}" rx="2" class="bar-tx"/></g>`;
@@ -311,8 +322,8 @@ async function loadFlows(force = false) {
 const when = (unix: number) => {
     const t = new Date(unix * 1000);
     return t.toDateString() === new Date().toDateString()
-        ? t.toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'})
-        : t.toLocaleDateString('ru-RU', {day: '2-digit', month: '2-digit'});
+        ? t.toLocaleTimeString(locale(), {hour: '2-digit', minute: '2-digit'})
+        : t.toLocaleDateString(locale(), {day: '2-digit', month: '2-digit'});
 };
 
 function renderFlows() {
@@ -324,8 +335,8 @@ function renderFlows() {
     const sel = $<HTMLSelectElement>('flowDay');
     const days: string[] = r.days ?? [];
     const periods = [['', 'Сегодня'], ['week', '7 дней'], ['month', '30 дней'], ['6m', '6 месяцев'], ['12m', '12 месяцев'], ['all', 'Всё время']];
-    const opts = periods.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')
-        + (days.length > 1 ? '<optgroup label="По дням">' + days.slice(1).map(d => `<option value="${esc(d)}">${esc(new Date(d).toLocaleDateString('ru-RU'))}</option>`).join('') + '</optgroup>' : '');
+    const opts = periods.map(([v, t]) => `<option value="${v}">${tr(t)}</option>`).join('')
+        + (days.length > 1 ? `<optgroup label="${tr('По дням')}">` + days.slice(1).map(d => `<option value="${esc(d)}">${esc(new Date(d).toLocaleDateString(locale()))}</option>`).join('') + '</optgroup>' : '');
     if (sel.dataset.opts !== opts) {
         const v = sel.value;
         sel.innerHTML = opts;
@@ -345,21 +356,21 @@ function renderFlows() {
         tx += row.tx; rx += row.rx;
     }
     const list = [...byApp.values()].sort((a, b) => val(b) - val(a) || a.name.localeCompare(b.name));
-    $('flowSum').textContent = rows.length ? `${list.length} программ · ↑ ${bytes(tx)} · ↓ ${bytes(rx)}` : '';
+    $('flowSum').textContent = rows.length ? `${plural(list.length, ['программа', 'программы', 'программ'], ['program', 'programs'])} · ↑ ${bytes(tx)} · ↓ ${bytes(rx)}` : '';
     const top = Math.max(1, ...list.map(val));
     const num = (x: AnyObj) => `<span class="fnum"><span class="tx">↑ ${bytes(x.tx)}</span><br><span class="rx">↓ ${bytes(x.rx)}</span></span>`;
     const ul = $('flowList');
     if (!list.length) {
-        ul.innerHTML = `<li class="empty">${r.enabled ? 'Пока ничего не записано — подключите VPN' : 'Журнал выключен'}</li>`;
+        ul.innerHTML = `<li class="empty">${tr(r.enabled ? 'Пока ничего не записано — подключите VPN' : 'Журнал выключен')}</li>`;
         return;
     }
     ul.innerHTML = list.map(a => {
         const dest = a.dest.sort((x, y) => val(y) - val(x));
-        const shown = dest.slice(0, 40).map(d => `<div><span class="fh" title="${esc(d.host)}">${esc(d.host)}<small>${esc(d.proto)} ${d.port || ''} · ${d.conns} соед. · ${esc(when(d.last))}</small></span>${num(d)}</div>`).join('');
-        const more = dest.length > 40 ? `<div><span class="fh"><small>и ещё ${dest.length - 40} адресов</small></span></div>` : '';
+        const shown = dest.slice(0, 40).map(d => `<div><span class="fh" title="${esc(d.host)}">${esc(d.host)}<small>${esc(d.proto)} ${d.port || ''} · ${tf('{0} соед.', d.conns)} · ${esc(when(d.last))}</small></span>${num(d)}</div>`).join('');
+        const more = dest.length > 40 ? `<div><span class="fh"><small>${tr('и ещё') + ' ' + plural(dest.length - 40, ['адрес', 'адреса', 'адресов'], ['address', 'addresses'])}</small></span></div>` : '';
         const pkg = android && /^[a-z][\w]*(\.[\w]+)+$/i.test(a.name);
         const label = pkg ? appLabel(a.name) : a.name;
-        const sub = (pkg && label !== a.name ? a.name + ' · ' : '') + `${dest.length} адресов · ${a.conns} соединений`;
+        const sub = (pkg && label !== a.name ? a.name + ' · ' : '') + `${plural(dest.length, ['адрес', 'адреса', 'адресов'], ['address', 'addresses'])} · ${plural(a.conns, ['соединение', 'соединения', 'соединений'], ['connection', 'connections'])}`;
         return `<li class="${flowOpen.has(a.name) ? 'open' : ''}" data-app="${esc(a.name)}">`
             + `<div class="fhead">${pkg ? appIcon(a.name) : ''}<span class="li-main"><span class="li-name" title="${esc(a.name)}">${esc(label)}</span>`
             + `<span class="li-sub">${esc(sub)}</span></span>${num(a)}</div>`
@@ -372,8 +383,8 @@ function renderApps() {
     const ul = $('appList');
     ul.innerHTML = apps.length
         ? apps.map((p, i) => `<li><span class="li-main"><span class="li-name">${esc(p.split('\\').pop())}</span><span class="li-sub" title="${esc(p)}">${esc(p)}</span></span>`
-            + `<button class="icon del x" data-i="${i}" data-tip="Убрать из списка" aria-label="Убрать"><svg><use href="#i-x"/></svg></button></li>`).join('')
-        : '<li class="empty">Список пуст</li>';
+            + `<button class="icon del x" data-i="${i}" data-tip="${tr('Убрать из списка')}" aria-label="${tr('Убрать')}"><svg><use href="#i-x"/></svg></button></li>`).join('')
+        : `<li class="empty">${tr('Список пуст')}</li>`;
     ul.querySelectorAll<HTMLButtonElement>('button.x').forEach(b => b.onclick = () => {
         apps.splice(Number(b.dataset.i), 1);
         settingsDirty = true;
@@ -388,8 +399,8 @@ function renderPkgs() {
     const ul = $('pkgList');
     ul.innerHTML = pkgs.length
         ? pkgs.map((p, i) => `<li>${appIcon(p)}<span class="li-main"><span class="li-name">${esc(appLabel(p))}</span><span class="li-sub">${esc(p)}</span></span>`
-            + `<button class="icon del x" data-i="${i}" aria-label="Убрать"><svg><use href="#i-x"/></svg></button></li>`).join('')
-        : '<li class="empty">Приложения не выбраны</li>';
+            + `<button class="icon del x" data-i="${i}" aria-label="${tr('Убрать')}"><svg><use href="#i-x"/></svg></button></li>`).join('')
+        : `<li class="empty">${tr('Приложения не выбраны')}</li>`;
     ul.querySelectorAll<HTMLButtonElement>('button.x').forEach(b => b.onclick = () => {
         pkgs.splice(Number(b.dataset.i), 1);
         settingsDirty = true;
@@ -398,9 +409,9 @@ function renderPkgs() {
     const mode = document.querySelector<HTMLInputElement>('input[name=appmode]:checked')?.value ?? 'all';
     $('pkgList').classList.toggle('hidden', mode === 'all');
     $('btnPickApps').classList.toggle('hidden', mode === 'all');
-    $('appModeHint').textContent = mode === 'all' ? 'Все приложения идут через VPN.'
+    $('appModeHint').textContent = tr(mode === 'all' ? 'Все приложения идут через VPN.'
         : mode === 'include' ? 'Через VPN идут только выбранные приложения, остальные — напрямую.'
-        : 'Выбранные приложения идут напрямую, все остальные — через VPN.';
+        : 'Выбранные приложения идут напрямую, все остальные — через VPN.');
 }
 
 function fillSettings(s: AnyObj) {
@@ -468,6 +479,11 @@ let firstState = true;
 async function refresh() {
     try {
         state = await Go.GetState() as AnyObj;
+        if (state.lang && state.lang !== lang) { // system language or a choice made elsewhere
+            setLang(state.lang);
+            location.reload();
+            return;
+        }
         syncSkin();
         render();
         if (firstState) {
@@ -527,7 +543,7 @@ $('btnAddApp').onclick = async () => {
             renderApps();
         }
     } catch (e: any) {
-        banner(`Выбор программы: ${e?.message ?? e}`);
+        banner(tf('Выбор программы: {0}', await errText(e)));
     }
 };
 $('chkAutostart').addEventListener('change', () => {
@@ -553,8 +569,8 @@ $('btnDownload').onclick = () => run('Получение конфига', async 
         await Go.DownloadConfig(false);
     } catch (e: any) {
         // Like the official client: the key is bound to other devices up to the limit; offer to move it here.
-        if (!String(e?.message ?? e).includes('лимит устройств')) throw e;
-        if (!await confirmed('Ключ используется на другом устройстве', 'Все места для устройств в подписке заняты. Использовать ключ на этом устройстве? Провайдер перенесёт его сюда, и на другом устройстве VPN может перестать работать.', 'Использовать здесь', true)) throw new Error('отменено — ключ остался на другом устройстве');
+        if (!/лимит устройств|device limit/.test(String(e?.message ?? e))) throw e;
+        if (!await confirmed('Ключ используется на другом устройстве', 'Все места для устройств в подписке заняты. Использовать ключ на этом устройстве? Провайдер перенесёт его сюда, и на другом устройстве VPN может перестать работать.', 'Использовать здесь', true)) throw new Error(tr('отменено — ключ остался на другом устройстве'));
         await Go.DownloadConfig(true);
     }
     if (wasUp && !android) { await Go.Disconnect(); await Go.Connect(); } // Android's core reconnects by itself
@@ -619,12 +635,12 @@ $('profList').addEventListener('click', async ev => {
     const p = (state.profiles ?? []).find((x: AnyObj) => x.id === id);
     if (!p) return;
     if (btn.dataset.act === 'use') {
-        run('Профиль', () => Go.SelectProfile(id), `Выбран профиль «${p.name}»`);
+        run('Профиль', () => Go.SelectProfile(id), tf('Выбран профиль «{0}»', p.name));
     } else if (btn.dataset.act === 'rename') {
-        const name = await ask('Переименовать профиль', '', {ok: 'Сохранить', input: p.name});
+        const name = await ask(tr('Переименовать профиль'), '', {ok: tr('Сохранить'), input: p.name});
         if (name !== null) run('Переименование', () => Go.RenameProfile(id, name));
     } else if (btn.dataset.act === 'delete') {
-        if (!await confirmed(`Удалить профиль «${p.name}»?`, 'Ключ и конфиг профиля будут удалены с этого устройства.', 'Удалить', true)) return;
+        if (!await confirmed(tf('Удалить профиль «{0}»?', p.name), 'Ключ и конфиг профиля будут удалены с этого устройства.', 'Удалить', true)) return;
         run('Удаление', () => Go.DeleteProfile(id), 'Профиль удалён');
     }
 });
@@ -634,6 +650,18 @@ $('btnExport').onclick = () => run('Экспорт', () => Go.ExportConfigFile()
 $('btnRebind').onclick = async () => {
     if (!await confirmed('Привязать ключ к этому устройству?', 'Провайдер перепривяжет ключ к этому устройству и выдаст новый конфиг. Другое устройство с этим ключом может перестать работать.', 'Привязать', true)) return;
     run('Перепривязка', () => Go.DownloadConfig(true), 'Ключ привязан к этому устройству, конфиг обновлён');
+};
+
+$('btnLang').onclick = async () => {
+    const next = lang === 'en' ? 'ru' : 'en';
+    try {
+        await (window as any).go.main.App.SetLanguage(next);
+    } catch (e) {
+        banner(await errText(e));
+        return;
+    }
+    setLang(next);
+    location.reload();
 };
 
 refresh();
@@ -654,7 +682,7 @@ if (android) {
         $('pkAll').innerHTML = list.length ? list.map(a => `<li data-pkg="${esc(a.pkg)}" class="${chosen.has(a.pkg) ? 'active' : ''}">${appIcon(a.pkg)}`
             + `<span class="li-main"><span class="li-name">${esc(a.label)}</span><span class="li-sub">${esc(a.pkg)}</span></span>`
             + `<span class="tick"><svg><use href="#i-check"/></svg></span></li>`).join('')
-            : '<li class="empty">Ничего не найдено</li>';
+            : `<li class="empty">${tr('Ничего не найдено')}</li>`;
     };
     $('pkAll').addEventListener('click', ev => {
         const li = (ev.target as HTMLElement).closest<HTMLElement>('li[data-pkg]');
@@ -668,7 +696,7 @@ if (android) {
     $('btnPickApps').onclick = async () => {
         chosen = new Set(pkgs);
         picker.classList.remove('hidden');
-        $('pkAll').innerHTML = '<li class="empty">Загрузка списка приложений…</li>';
+        $('pkAll').innerHTML = `<li class="empty">${tr('Загрузка списка приложений…')}</li>`;
         try {
             if (!appIndex) appIndex = (await call('ListApps')) as AppInfo[];
             renderPicker();
@@ -705,18 +733,18 @@ function renderSpeedTest(st: AnyObj | undefined) {
     const phaseName: AnyObj = {connect: 'Подключение к серверу теста…', connected: 'Измеряю загрузку…', download: 'Измеряю загрузку…', upload: 'Измеряю отдачу…'};
     const countries: AnyObj = {FI: 'Финляндия', NL: 'Нидерланды', DE: 'Германия', SE: 'Швеция', EE: 'Эстония', LV: 'Латвия', LT: 'Литва', PL: 'Польша',
         FR: 'Франция', GB: 'Великобритания', US: 'США', KZ: 'Казахстан', TR: 'Турция', AM: 'Армения', GE: 'Грузия', RU: 'Россия'};
-    $('stExit').innerHTML = st?.ip ? `Замер шёл с адреса <b>${esc(st.ip)}</b>${st.loc ? ` · ${esc(countries[st.loc] ?? st.loc)}` : ''}`
-        + (st.loc === 'RU' ? ' — похоже, мимо VPN' : ' — это выход VPN, не ваш домашний адрес') : '';
-    $('stPhase').textContent = running ? phaseName[st!.phase] ?? '…'
-        : st?.error ? `Ошибка: ${st.error}` : st?.at && !String(st.at).startsWith('0001') ? 'Готово' : '';
+    $('stExit').innerHTML = st?.ip ? tf('Замер шёл с адреса <b>{0}</b>', esc(st.ip)) + (st.loc ? ` · ${esc(tr(countries[st.loc] ?? st.loc))}` : '')
+        + tr(st.loc === 'RU' ? ' — похоже, мимо VPN' : ' — это выход VPN, не ваш домашний адрес') : '';
+    $('stPhase').textContent = running ? tr(phaseName[st!.phase] ?? '…')
+        : st?.error ? tf('Ошибка: {0}', st.error) : st?.at && !String(st.at).startsWith('0001') ? tr('Готово') : '';
     $('stNow').textContent = running ? (st!.phase === 'connect' || st!.phase === 'connected' ? '…' : mbit(st!.mbps ?? 0))
         : st?.down_mbps ? mbit(st.down_mbps) : '—';
     const down = running && st!.phase === 'download' ? st!.mbps : st?.down_mbps;
     const up = running && st!.phase === 'upload' ? st!.mbps : st?.up_mbps;
-    $('stDown').textContent = down ? `${mbit(down)} Мбит/с` : running && st!.phase !== 'connect' ? '…' : '—';
-    $('stUp').textContent = up ? `${mbit(up)} Мбит/с` : '—';
+    $('stDown').textContent = down ? tf('{0} Мбит/с', mbit(down)) : running && st!.phase !== 'connect' ? '…' : '—';
+    $('stUp').textContent = up ? tf('{0} Мбит/с', mbit(up)) : '—';
     const ping = state.speed?.ping_ms;
-    $('stPing').textContent = ping >= 0 ? `${ping} мс` : '—';
+    $('stPing').textContent = ping >= 0 ? tf('{0} мс', ping) : '—';
     $('stDown').parentElement!.classList.toggle('now', running && st!.phase === 'download');
     $('stUp').parentElement!.classList.toggle('now', running && st!.phase === 'upload');
     ($('stAgain') as HTMLButtonElement).disabled = running;

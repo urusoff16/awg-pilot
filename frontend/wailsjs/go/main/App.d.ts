@@ -55,6 +55,8 @@ export function SelectProfile(arg1:string):Promise<void>;
 
 export function SetAutostart(arg1:boolean):Promise<void>;
 
+export function SetLanguage(arg1:string):Promise<void>;
+
 export function SetSkin(arg1:string):Promise<void>;
 
 export function SetTrafficLog(arg1:boolean):Promise<void>;
@@ -66,5 +68,7 @@ export function ShowWindow():Promise<void>;
 export function SpeedTest():Promise<void>;
 
 export function TrafficLog(arg1:string):Promise<flows.Report>;
+
+export function Translate(arg1:string):Promise<string>;
 
 export function Unlock():Promise<void>;

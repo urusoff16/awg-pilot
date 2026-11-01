@@ -272,6 +272,7 @@ export namespace main {
 	    usage: usage.Summary;
 	    russia_list: string;
 	    speedtest: speedtest.State;
+	    lang: string;
 	    other_vpn: string;
 	
 	    static createFrom(source: any = {}) {
@@ -303,6 +304,7 @@ export namespace main {
 	        this.usage = this.convertValues(source["usage"], usage.Summary);
 	        this.russia_list = source["russia_list"];
 	        this.speedtest = this.convertValues(source["speedtest"], speedtest.State);
+	        this.lang = source["lang"];
 	        this.other_vpn = source["other_vpn"];
 	    }
 	
@@ -331,6 +333,7 @@ export namespace main {
 	    rx: number;
 	    tx: number;
 	    ping: number;
+	    lang: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new WidgetStatus(source);
@@ -344,6 +347,7 @@ export namespace main {
 	        this.rx = source["rx"];
 	        this.tx = source["tx"];
 	        this.ping = source["ping"];
+	        this.lang = source["lang"];
 	    }
 	}
 
@@ -489,6 +493,7 @@ export namespace store {
 	    lockdown_on_drop: boolean;
 	    show_widget: boolean;
 	    skin: string;
+	    language: string;
 	    app_mode: string;
 	    app_packages: string[];
 	    device_id: string;
@@ -518,6 +523,7 @@ export namespace store {
 	        this.lockdown_on_drop = source["lockdown_on_drop"];
 	        this.show_widget = source["show_widget"];
 	        this.skin = source["skin"];
+	        this.language = source["language"];
 	        this.app_mode = source["app_mode"];
 	        this.app_packages = source["app_packages"];
 	        this.device_id = source["device_id"];

@@ -102,6 +102,10 @@ export function SetAutostart(arg1) {
   return window['go']['main']['App']['SetAutostart'](arg1);
 }
 
+export function SetLanguage(arg1) {
+  return window['go']['main']['App']['SetLanguage'](arg1);
+}
+
 export function SetSkin(arg1) {
   return window['go']['main']['App']['SetSkin'](arg1);
 }
@@ -124,6 +128,10 @@ export function SpeedTest() {
 
 export function TrafficLog(arg1) {
   return window['go']['main']['App']['TrafficLog'](arg1);
+}
+
+export function Translate(arg1) {
+  return window['go']['main']['App']['Translate'](arg1);
 }
 
 export function Unlock() {

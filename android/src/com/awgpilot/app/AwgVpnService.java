@@ -192,7 +192,7 @@ public final class AwgVpnService extends VpnService {
     private void enterForeground() {
         if (foreground) return;
         try {
-            JSONObject b = new JSONObject().put("title", "Подключение…");
+            JSONObject b = new JSONObject().put("title", Core.t("Подключение…", "Connecting…"));
             android.app.Notification n = Notifier.status(this, b);
             if (Build.VERSION.SDK_INT >= 34) {
                 startForeground(Notifier.STATUS_ID, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED);

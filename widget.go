@@ -14,6 +14,7 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/sys/windows"
 
+	"awgpilot/internal/i18n"
 	"awgpilot/internal/ipc"
 )
 
@@ -47,6 +48,7 @@ type WidgetStatus struct {
 	Rx     float64 `json:"rx"`   // bytes per second, for the graph
 	Tx     float64 `json:"tx"`   //
 	PingMs int64   `json:"ping"` // -1 = no reply
+	Lang   string  `json:"lang"` // interface language: "ru" or "en"
 }
 
 func (w *Widget) startup(ctx context.Context) { w.ctx = ctx }
@@ -64,7 +66,7 @@ func (w *Widget) domReady(ctx context.Context) {
 		}
 	}
 	wruntime.WindowSetPosition(ctx, x, y)
-	hideFromTaskbar(widgetTitle)
+	hideFromTaskbar(i18n.T(widgetTitle))
 }
 
 func (w *Widget) shutdown(ctx context.Context) {
@@ -72,8 +74,14 @@ func (w *Widget) shutdown(ctx context.Context) {
 	saveWidgetPos(x, y)
 }
 
-// Status computes the colour and text from the service state.
+// Status computes the colour and text from the service state, in the interface language.
 func (w *Widget) Status() WidgetStatus {
+	st := w.status()
+	st.Title, st.Detail, st.Lang = i18n.T(st.Title), i18n.T(st.Detail), i18n.Lang()
+	return st
+}
+
+func (w *Widget) status() WidgetStatus {
 	if _, err := w.c.Version(); err != nil {
 		return WidgetStatus{State: "bad", Title: "Служба не запущена", Detail: "переустановите AWG Pilot"}
 	}
@@ -156,12 +164,13 @@ func saveWidgetPos(x, y int) {
 }
 
 var (
-	user32           = windows.NewLazySystemDLL("user32.dll")
-	procFindWindowW  = user32.NewProc("FindWindowW")
-	procGetWindowLng = user32.NewProc("GetWindowLongPtrW")
-	procSetWindowLng = user32.NewProc("SetWindowLongPtrW")
-	procShowWindow   = user32.NewProc("ShowWindow")
-	procSetWindowPos = user32.NewProc("SetWindowPos")
+	user32              = windows.NewLazySystemDLL("user32.dll")
+	procFindWindowW     = user32.NewProc("FindWindowW")
+	procGetWindowLng    = user32.NewProc("GetWindowLongPtrW")
+	procSetWindowLng    = user32.NewProc("SetWindowLongPtrW")
+	procShowWindow      = user32.NewProc("ShowWindow")
+	procSetWindowPos    = user32.NewProc("SetWindowPos")
+	procIsWindowVisible = user32.NewProc("IsWindowVisible")
 )
 
 const (
@@ -182,10 +191,15 @@ func noMaximize(title string) {
 	if err != nil {
 		return
 	}
-	for i := 0; i < findWindowTries*3; i++ {
+	// Wait until Wails has shown the window: changing the style of a window that is being shown
+	// at that moment could write back a style without WS_VISIBLE and leave it hidden.
+	for i := 0; i < findWindowTries*10; i++ {
 		hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(t)))
-		if hwnd != 0 {
+		if visible, _, _ := procIsWindowVisible.Call(hwnd); hwnd != 0 && visible != 0 {
 			style, _, _ := procGetWindowLng.Call(hwnd, gwlStyle)
+			if style&wsMaximizeBox == 0 {
+				return
+			}
 			procSetWindowLng.Call(hwnd, gwlStyle, style&^wsMaximizeBox)
 			// SWP_NOSIZE|SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_FRAMECHANGED: redraw the caption
 			procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0, 0x0001|0x0002|0x0004|0x0010|0x0020)

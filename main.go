@@ -4,12 +4,14 @@ import (
 	"embed"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
+	"awgpilot/internal/i18n"
 	"awgpilot/internal/service"
 )
 
@@ -78,9 +80,16 @@ func main() {
 
 // runWidget shows the small status window (started by the main app from the tray menu).
 func runWidget() {
+	lang := "ru"
+	for _, a := range os.Args[2:] {
+		if v, ok := strings.CutPrefix(a, "--lang="); ok {
+			lang = v
+		}
+	}
+	i18n.SetLanguage(lang)
 	w := &Widget{}
 	err := wails.Run(&options.App{
-		Title:            widgetTitle,
+		Title:            i18n.T(widgetTitle),
 		Width:            widgetWidth,
 		Height:           widgetHeight,
 		DisableResize:    true,

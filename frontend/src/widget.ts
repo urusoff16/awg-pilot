@@ -1,14 +1,15 @@
 import './widget.css';
 import * as W from '../wailsjs/go/main/Widget';
+import {t, tf, setLang, units, perSec} from './i18n';
 
 // History length of the graph: one sample per second, as in DU Meter's mini window.
 const SAMPLES = 90;
 
 const rate = (v: number) => {
-    const u = ['Б', 'КБ', 'МБ', 'ГБ'];
+    const u = units();
     let i = 0;
     while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-    return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${u[i]}/с`;
+    return `${v < 10 && i > 0 ? v.toFixed(1) : Math.round(v)} ${u[i]}${perSec()}`;
 };
 
 // runWidget replaces the page with the compact always-on-top status window: a scrolling
@@ -25,7 +26,7 @@ export function runWidget() {
                 <span class="w-tx" id="wTx">↑ —</span>
                 <span class="w-grow"></span>
                 <span class="w-ping" id="wPing"></span>
-                <button class="w-close" id="wClose" title="Скрыть окошко">✕</button>
+                <button class="w-close" id="wClose">✕</button>
             </div>
             <div class="w-bottom"><span id="wTitle">AWG Pilot</span><span class="w-grow"></span><span id="wPeak"></span></div>
         </div>`;
@@ -94,7 +95,7 @@ export function runWidget() {
             ctx.fillStyle = 'rgba(70, 140, 100, .35)';
             ctx.fillRect(0, base, w, 1);
         }
-        document.getElementById('wPeak')!.textContent = rx.length > 1 ? `макс ${rate(peak / 1.15)}` : '';
+        document.getElementById('wPeak')!.textContent = rx.length > 1 ? tf('макс {0}', rate(peak / 1.15)) : '';
     };
 
     const update = async () => {
@@ -102,8 +103,9 @@ export function runWidget() {
         try {
             s = await W.Status();
         } catch {
-            s = {state: 'bad', title: 'Нет связи со службой', detail: '', rx: 0, tx: 0, ping: -1};
+            s = {state: 'bad', title: t('Нет связи со службой'), detail: '', rx: 0, tx: 0, ping: -1};
         }
+        if (s.lang) setLang(s.lang);
         last = s;
         box.className = `w-box ${s.state}`;
         const up = s.state === 'ok';
@@ -113,7 +115,8 @@ export function runWidget() {
         document.getElementById('wTx')!.textContent = up ? `↑ ${rate(s.tx)}` : '';
         document.getElementById('wPing')!.textContent = up && s.ping >= 0 ? `${s.ping} мс` : '';
         document.getElementById('wTitle')!.textContent = up ? 'AWG Pilot' : s.detail;
-        box.title = `${s.title}${s.detail ? ' — ' + s.detail : ''}\nДвойной щелчок — открыть AWG Pilot`;
+        box.title = `${s.title}${s.detail ? ' — ' + s.detail : ''}\n${t('Двойной щелчок — открыть AWG Pilot')}`;
+        document.getElementById('wClose')!.title = t('Скрыть окошко');
         draw();
     };
     window.addEventListener('resize', () => last && draw());

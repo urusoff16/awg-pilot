@@ -19,6 +19,7 @@ import (
 	"awgpilot/internal/autostart"
 	"awgpilot/internal/flows"
 	"awgpilot/internal/geoip"
+	"awgpilot/internal/i18n"
 	"awgpilot/internal/ipc"
 	"awgpilot/internal/keyapi"
 	"awgpilot/internal/netstat"
@@ -33,7 +34,7 @@ import (
 	"awgpilot/internal/vpnkey"
 )
 
-const appVersion = "0.9.0"
+const appVersion = "0.9.1"
 
 var dnsPresets = map[string][]string{
 	"cloudflare": {"1.1.1.1", "1.0.0.1"},
@@ -108,6 +109,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.st = st
 	a.settings, err = st.LoadSettings()
+	i18n.SetLanguage(i18n.Resolve(a.settings.Language, i18n.System()))
 	if err != nil {
 		a.logf("настройки повреждены, использую значения по умолчанию: %v", err)
 	}
@@ -216,6 +218,7 @@ func (a *App) ShowWindow() {
 	}
 	wruntime.WindowShow(a.ctx)
 	wruntime.WindowUnminimise(a.ctx)
+	go noMaximize("AWG Pilot " + appVersion) // a window started hidden in the tray gets it here
 }
 
 // Quit disconnects and exits the program.
@@ -323,6 +326,7 @@ type State struct {
 	Usage        usage.Summary          `json:"usage"`
 	RussiaList   string                 `json:"russia_list"` // status of the Russian networks list
 	SpeedTest    speedtest.State        `json:"speedtest"`
+	Lang         string                 `json:"lang"`      // interface language in effect: "ru" or "en"
 	OtherVPN     string                 `json:"other_vpn"` // adapter of another VPN that carries the traffic instead
 }
 
@@ -399,11 +403,29 @@ func (a *App) GetState() State {
 	if !s.Tunnel.Up {
 		s.Speed = SpeedInfo{PingMs: -1}
 	}
-	s.Alert = a.alert.Load()
+	if al := a.alert.Load(); al != nil {
+		c := *al
+		c.Message = i18n.T(c.Message)
+		s.Alert = &c
+	}
+	s.Lang = i18n.Lang()
+	s.RussiaList = i18n.T(s.RussiaList)
+	s.ConfigFor = i18n.T(s.ConfigFor)
+	for i := range s.Profiles {
+		s.Profiles[i].ConfigFor = i18n.T(s.Profiles[i].ConfigFor)
+	}
+	if len(s.Warnings) > 0 {
+		w := make([]string, len(s.Warnings))
+		for i, x := range s.Warnings {
+			w[i] = i18n.T(x)
+		}
+		s.Warnings = w
+	}
 	if s.Tunnel.Up && a.settings.Split.Mode != routing.ModeInclude {
 		s.OtherVPN = otherVPN()
 	}
 	s.SpeedTest = a.speed.Snapshot()
+	s.SpeedTest.Error = i18n.T(s.SpeedTest.Error)
 	if a.key != nil {
 		s.MaskedKey, s.APIEndpoint = a.key.Masked(), a.key.APIEndpoint
 	}
@@ -428,7 +450,36 @@ func (a *App) GetState() State {
 	return s
 }
 
-func (a *App) GetLogs() []string { return a.logs.Lines() }
+func (a *App) GetLogs() []string {
+	lines := a.logs.Lines()
+	if i18n.English() {
+		for i, l := range lines {
+			lines[i] = i18n.T(l)
+		}
+	}
+	return lines
+}
+
+// Translate shows a message from the program (an error, for example) in the interface language.
+func (a *App) Translate(s string) string { return i18n.T(s) }
+
+// SetLanguage switches the interface language: "" follows the system, "ru" or "en".
+func (a *App) SetLanguage(lang string) error {
+	a.mu.Lock()
+	a.settings.Language = lang
+	a.saveSettings()
+	widget := a.settings.ShowWidget
+	a.mu.Unlock()
+	i18n.SetLanguage(i18n.Resolve(lang, i18n.System()))
+	if a.tray != nil {
+		a.tray.Retitle()
+	}
+	if widget { // the status window takes the language when it starts
+		a.stopWidget()
+		return a.startWidget()
+	}
+	return nil
+}
 
 // SpeedTest measures download and upload against Cloudflare through the VPN adapter.
 func (a *App) SpeedTest() error {
@@ -469,7 +520,13 @@ func (a *App) ResetUsage() error {
 
 // TrafficLog returns which programs sent traffic through the VPN and where on one day
 // ("" = today). The service records it while the log is switched on.
-func (a *App) TrafficLog(day string) (flows.Report, error) { return a.tun.c.Flows(day) }
+func (a *App) TrafficLog(day string) (flows.Report, error) {
+	rep, err := a.tun.c.Flows(day)
+	for i := range rep.Rows {
+		rep.Rows[i].App, rep.Rows[i].Host = i18n.T(rep.Rows[i].App), i18n.T(rep.Rows[i].Host)
+	}
+	return rep, err
+}
 
 // SetTrafficLog switches the per-program traffic log on or off.
 func (a *App) SetTrafficLog(on bool) error { return a.tun.c.SetFlowLog(on) }
@@ -590,8 +647,8 @@ func (a *App) ImportConfig(text string) error {
 // ImportConfigFile lets the user pick a .conf file; it becomes a new profile named after the file.
 func (a *App) ImportConfigFile() error {
 	p, err := wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title:   "Импорт конфигурации AmneziaWG",
-		Filters: []wruntime.FileFilter{{DisplayName: "Конфиг или ключ (*.conf, *.vpn)", Pattern: "*.conf;*.vpn"}},
+		Title:   i18n.T("Импорт конфигурации AmneziaWG"),
+		Filters: []wruntime.FileFilter{{DisplayName: i18n.T("Конфиг или ключ (*.conf, *.vpn)"), Pattern: "*.conf;*.vpn"}},
 	})
 	if err != nil || p == "" {
 		return err
@@ -631,7 +688,7 @@ func (a *App) ExportConfigFile() error {
 	}
 	a.mu.Unlock()
 	p, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
-		Title:           "Экспорт конфигурации",
+		Title:           i18n.T("Экспорт конфигурации"),
 		DefaultFilename: name + ".conf",
 		Filters:         []wruntime.FileFilter{{DisplayName: "AmneziaWG (*.conf)", Pattern: "*.conf"}},
 	})
@@ -932,8 +989,8 @@ func (a *App) SaveSettings(s store.Settings) error {
 // PickApp opens a file dialog to choose a program for the "only through VPN" list.
 func (a *App) PickApp() (string, error) {
 	return wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title:   "Программа, которой разрешён интернет только через VPN",
-		Filters: []wruntime.FileFilter{{DisplayName: "Программы (*.exe)", Pattern: "*.exe"}},
+		Title:   i18n.T("Программа, которой разрешён интернет только через VPN"),
+		Filters: []wruntime.FileFilter{{DisplayName: i18n.T("Программы (*.exe)"), Pattern: "*.exe"}},
 	})
 }
 
@@ -1011,7 +1068,7 @@ func (a *App) startWidget() error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, "--widget")
+	cmd := exec.Command(exe, "--widget", "--lang="+i18n.Lang())
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("окошко статуса не запустилось: %w", err)
 	}

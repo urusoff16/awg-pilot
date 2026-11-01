@@ -24,10 +24,10 @@ final class Notifier {
     static void createChannels(Context ctx) {
         if (Build.VERSION.SDK_INT < 26) return;
         NotificationManager nm = ctx.getSystemService(NotificationManager.class);
-        NotificationChannel ev = new NotificationChannel(EVENTS, "События VPN", NotificationManager.IMPORTANCE_DEFAULT);
-        ev.setDescription("Потеря связи, восстановление, подписка");
-        NotificationChannel st = new NotificationChannel(STATUS, "Состояние VPN", NotificationManager.IMPORTANCE_LOW);
-        st.setDescription("Скорость и сервер, пока VPN включён");
+        NotificationChannel ev = new NotificationChannel(EVENTS, Core.t("События VPN", "VPN events"), NotificationManager.IMPORTANCE_DEFAULT);
+        ev.setDescription(Core.t("Потеря связи, восстановление, подписка", "Lost link, recovery, subscription"));
+        NotificationChannel st = new NotificationChannel(STATUS, Core.t("Состояние VPN", "VPN status"), NotificationManager.IMPORTANCE_LOW);
+        st.setDescription(Core.t("Скорость и сервер, пока VPN включён", "Speed and server while the VPN is on"));
         st.setShowBadge(false);
         nm.createNotificationChannel(ev);
         nm.createNotificationChannel(st);
@@ -59,7 +59,7 @@ final class Notifier {
         if (b.optBoolean("healthy")) {
             long ping = b.optLong("ping_ms", -1);
             text = String.format(Locale.ROOT, "↓ %s  ↑ %s%s", rate(b.optDouble("rx_bps")), rate(b.optDouble("tx_bps")),
-                    ping >= 0 ? "  ·  " + ping + " мс" : "");
+                    ping >= 0 ? "  ·  " + ping + Core.t(" мс", " ms") : "");
         } else {
             text = b.optString("server", "");
         }
@@ -68,7 +68,7 @@ final class Notifier {
         PendingIntent offPi = PendingIntent.getService(ctx, 1, off, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder nb = builder(ctx, STATUS).setContentTitle(title).setContentText(text)
                 .setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false)
-                .addAction(action("Отключить", offPi));
+                .addAction(action(Core.t("Отключить", "Disconnect"), offPi));
         if (!profile.isEmpty()) nb.setSubText(profile);
         if (Build.VERSION.SDK_INT < 26) nb.setPriority(Notification.PRIORITY_LOW);
         return nb.build();
@@ -82,7 +82,7 @@ final class Notifier {
     }
 
     static String rate(double bps) {
-        String[] u = {"Б/с", "КБ/с", "МБ/с", "ГБ/с"};
+        String[] u = Core.english ? new String[]{"B/s", "KB/s", "MB/s", "GB/s"} : new String[]{"Б/с", "КБ/с", "МБ/с", "ГБ/с"};
         int i = 0;
         while (bps >= 1024 && i < u.length - 1) {
             bps /= 1024;
