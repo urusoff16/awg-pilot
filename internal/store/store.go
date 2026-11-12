@@ -58,13 +58,21 @@ func DefaultSettings() Settings {
 		Split: routing.Settings{Mode: routing.ModeFull}}
 }
 
-// Profile is one subscription key and/or AmneziaWG config.
+// Profile is one subscription key and/or AmneziaWG config, or a proxy subscription.
 type Profile struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	VPNKey    string `json:"vpn_key,omitempty"`
 	RawConfig string `json:"raw_config,omitempty"`
 	ConfigFor string `json:"config_for,omitempty"` // where the config came from
+	// Sub is a proxy subscription (VLESS, Trojan, Shadowsocks, VMess servers run by Xray); such a
+	// profile has no key or config.
+	Sub *Subscription `json:"sub,omitempty"`
+}
+
+// Usable reports whether the profile has something to connect with.
+func (p *Profile) Usable() bool {
+	return p.RawConfig != "" || (p.Sub != nil && len(p.Sub.Servers) > 0)
 }
 
 // Secrets never leave this machine unencrypted.

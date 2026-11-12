@@ -1,6 +1,6 @@
 # AWG Pilot
 
-**VPN-клиент AmneziaWG для Windows и Android**, который сам держит соединение, показывает, куда уходит трафик, и не мешает работать.
+**VPN-клиент AmneziaWG и VLESS для Windows и Android**, который сам держит соединение, показывает, куда уходит трафик, и не мешает работать.
 
 [English version](README.en.md) · [Скачать](../../releases/latest)
 
@@ -10,6 +10,9 @@
 
 **Подключение**
 - Движок AmneziaWG 3.1 (работает и с серверами AmneziaWG 2.0).
+- Подписки VLESS, Trojan, Shadowsocks и VMess (ссылка `https://…` из бота или личного кабинета провайдера, форматы Remnawave, Marzban, 3x-ui) и отдельные ссылки `vless://`, `trojan://`, `ss://`, `vmess://` — через движок Xray-core: REALITY, TLS, XTLS Vision, WebSocket, gRPC, XHTTP, фрагментация ClientHello.
+- Серверы подписки: проверка задержки (полный запрос через сервер), группы (LTE, SMART, BRIDGE…), трафик, срок и объявления провайдера, автообновление списка.
+- Свой сервер для каждой сети: Wi-Fi, мобильный интернет и кабель. При смене сети AWG Pilot сам переходит на сервер для неё (по умолчанию в мобильной сети — серверы группы LTE). Если сервер перестал отвечать, остальные проверяются разом и VPN переходит на самый быстрый из работающих.
 - Совместим с ключами, начинающимися на `vpn://` (пока проверено только с ключами Sotka VPN), и с ключами AmneziaVPN (файлы `.vpn`), а также с конфигами AmneziaWG `.conf`; несколько профилей.
 - Автовосстановление: сервер пингуется каждые 5 секунд. Если пинг пропал, AWG Pilot переподключается, пробует ещё раз, берёт свежий конфиг, переходит на следующий профиль, просит у провайдера другой сервер и повторяет круг, пока связь не появится. Переход Wi-Fi ↔ мобильная сеть проверяется за секунды.
 
@@ -42,7 +45,7 @@
 ## Первые шаги
 
 1. Выключите другие VPN-клиенты с тем же ключом: два клиента с одним ключом отзывают конфиги друг у друга.
-2. Откройте AWG Pilot → **Профили и ключи** → вставьте ключ или импортируйте файл `.vpn` / `.conf`.
+2. Откройте AWG Pilot → **Профили и ключи** → вставьте ключ `vpn://`, ссылку на подписку `https://…` или ссылку `vless://…`, либо импортируйте файл `.vpn` / `.conf`.
 3. Нажмите кнопку питания. Окошко статуса и журнал трафика — в **Настройках** и **Статистике**.
 
 ## Как устроено
@@ -51,12 +54,12 @@
 
 ## Сборка из исходников
 
-- **Windows:** Go 1.26, Node.js, [Wails v2](https://wails.io): `wails build -platform windows/amd64 -trimpath -ldflags "-s -w"`, для установщика добавьте `-nsis` (нужен NSIS 3).
+- **Windows:** Go 1.27, Node.js, [Wails v2](https://wails.io): `wails build -platform windows/amd64 -trimpath -ldflags "-s -w"`, для установщика добавьте `-nsis` (нужен NSIS 3).
 - **Android:** Android SDK (build-tools 36.1, platform 36), NDK 28, JDK 17+: `android\build.ps1`, Gradle не нужен.
 
 ## Благодарности
 
-В основе: [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go), [amneziawg-windows](https://github.com/amnezia-vpn/amneziawg-windows), [WinTun](https://www.wintun.net), [Wails](https://wails.io) и [gVisor](https://gvisor.dev). Лицензии — в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+В основе: [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go), [amneziawg-windows](https://github.com/amnezia-vpn/amneziawg-windows), [WinTun](https://www.wintun.net), [Xray-core](https://github.com/XTLS/Xray-core), [Wails](https://wails.io) и [gVisor](https://gvisor.dev). Лицензии — в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 AWG Pilot — независимый проект, не связанный с Amnezia, WireGuard или каким-либо VPN-провайдером. WireGuard — зарегистрированный товарный знак Jason A. Donenfeld.
 

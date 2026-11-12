@@ -67,7 +67,11 @@ func (a *App) monitor() {
 			}
 			a.rec.mu.Unlock()
 			if first && a.announce.Swap(false) {
-				a.notify("VPN подключён", "Сервер "+hostOf(st.Endpoint))
+				server := st.ServerName
+				if server == "" {
+					server = hostOf(st.Endpoint)
+				}
+				a.notify("VPN подключён", "Сервер "+server)
 			}
 		} else {
 			havePrev = false
@@ -98,6 +102,7 @@ func (a *App) watchdog() {
 		a.mu.Lock()
 		enabled, autoChange, hasKey := a.settings.Reconnect, a.settings.AutoChangeServer, a.key != nil
 		activeID, profiles := a.secrets.ActiveID, len(a.secrets.Profiles)
+		isSub := a.secrets.Active() != nil && a.secrets.Active().Sub != nil
 		a.mu.Unlock()
 		st := a.stats()
 		if !st.Up {
@@ -117,6 +122,7 @@ func (a *App) watchdog() {
 				a.rec.mu.Lock()
 				a.rec.stage, a.rec.failovers = 0, 0
 				a.rec.mu.Unlock()
+				a.clearFailed()
 				a.logf("соединение восстановлено")
 				a.notify("Соединение восстановлено", "VPN снова работает")
 				if al := a.alert.Load(); al != nil && al.Kind == "server_down" {
@@ -127,6 +133,10 @@ func (a *App) watchdog() {
 		}
 		if !enabled || noNet {
 			continue // without any network there is nothing to reconnect over; wait for one
+		}
+		if isSub {
+			a.subRecover(stage, why, profiles, st.LastHandshake.IsZero())
+			continue
 		}
 
 		step := health.Plan(stage, hasKey, moreProfiles)
@@ -219,13 +229,13 @@ func (a *App) tryFailover() bool {
 	name, needConfig, ok := "", false, false
 	for i := 1; i < n; i++ {
 		p := a.secrets.Profiles[(cur+i)%n]
-		if p.RawConfig == "" && p.VPNKey == "" {
+		if !p.Usable() && p.VPNKey == "" {
 			continue
 		}
 		a.secrets.ActiveID = p.ID
 		a.activateLocked()
 		a.saveSecrets()
-		name, needConfig, ok = p.Name, p.RawConfig == "", true
+		name, needConfig, ok = p.Name, !p.Usable(), true
 		break
 	}
 	a.mu.Unlock()

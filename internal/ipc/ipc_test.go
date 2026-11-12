@@ -15,6 +15,7 @@ import (
 
 	"awgpilot/internal/flows"
 	"awgpilot/internal/tunnel"
+	"awgpilot/internal/xray"
 )
 
 type fakeBackend struct {
@@ -56,6 +57,13 @@ func (f *fakeBackend) Logs(since int) ([]string, int) {
 func (f *fakeBackend) Flows(day string) flows.Report { return flows.Report{Day: day} }
 func (f *fakeBackend) SetFlowLog(bool) error         { return nil }
 func (f *fakeBackend) ClearFlows() error             { return nil }
+func (f *fakeBackend) TestServers(l []string) []xray.Result {
+	out := make([]xray.Result, len(l))
+	for i := range out {
+		out[i] = xray.Result{Ms: int64(100 + i)}
+	}
+	return out
+}
 
 func TestRoundTrip(t *testing.T) {
 	path := fmt.Sprintf(`\\.\pipe\AWGPilotTest-%d`, time.Now().UnixNano())

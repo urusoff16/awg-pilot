@@ -21,6 +21,7 @@ import (
 
 	"awgpilot/internal/awgconf"
 	"awgpilot/internal/wfp"
+	"awgpilot/internal/xray"
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"github.com/amnezia-vpn/amneziawg-go/v3/device"
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
@@ -48,7 +49,12 @@ type Options struct {
 	// Lockdown is handled by the service (internet stays closed if the tunnel drops);
 	// Manager itself ignores it.
 	Lockdown bool
-	Logf     func(format string, args ...any)
+	// Proxy, when set, is the share link of a subscription server (vless://, trojan://, ss://,
+	// vmess://): the traffic goes through it with Xray and RawConfig is not used. ProxyAddr is the
+	// server's address resolved in advance ("" = let Xray resolve the name).
+	Proxy     string
+	ProxyAddr string
+	Logf      func(format string, args ...any)
 }
 
 // ULA address given to the adapter so Windows will use the IPv6 blackhole route.
@@ -66,6 +72,9 @@ type Stats struct {
 	IPv6Blocked   bool      `json:"ipv6_blocked"`
 	NetChanges    uint64    `json:"net_changes"` // physical network switches seen (Wi-Fi, cable, hotspot)
 	NoNetwork     bool      `json:"no_network"`  // no physical default route: nothing to reconnect over
+	NetKind       string    `json:"net_kind"`    // physical network: "wifi", "mobile", "wired" or ""
+	Proxy         bool      `json:"proxy"`       // the tunnel goes through a subscription server (Xray)
+	ServerName    string    `json:"server_name"` // the subscription server's name (proxy only)
 
 	// Filled in by the service, not by Manager:
 	Blocked   bool  `json:"blocked"`    // internet closed because the VPN dropped
@@ -94,13 +103,24 @@ type Manager struct {
 
 	netChanges atomic.Uint64
 	noNet      atomic.Bool
+	netKind    atomic.Value // string
+
+	// proxy mode (Options.Proxy): Xray instead of the AmneziaWG device
+	proxy         *xray.Engine
+	binder        *xray.Binder
+	proxyEndpoint string
+	proxyName     string
+	proxyOK       atomic.Int64 // unix nanoseconds of the last successful request through the server
 }
+
+// up reports whether a tunnel of either kind runs; callers hold m.mu.
+func (m *Manager) up() bool { return m.dev != nil || m.proxy != nil }
 
 // LUID of the running tunnel adapter, or 0 when down.
 func (m *Manager) LUID() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.dev == nil || m.nativeTun == nil {
+	if !m.up() || m.nativeTun == nil {
 		return 0
 	}
 	return m.nativeTun.LUID()
@@ -128,12 +148,21 @@ func ParseConfig(raw string) (*conf.Config, error) {
 func (m *Manager) Up(o Options) (err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.dev != nil {
+	if m.up() {
 		return errors.New("туннель уже запущен")
 	}
 	logf := o.Logf
 	if logf == nil {
 		logf = log.Printf
+	}
+	m.netKind.Store(NetKind())
+	if o.Proxy != "" {
+		defer func() {
+			if err != nil {
+				m.teardownLocked()
+			}
+		}()
+		return m.upProxy(o, logf)
 	}
 	cfg, err := ParseConfig(o.RawConfig)
 	if err != nil {
@@ -246,7 +275,7 @@ func (m *Manager) Up(o Options) (err error) {
 			// With a default route through the tunnel, losing the physical route must not let
 			// encrypted packets loop back into the tunnel: blackhole them instead.
 			hasDefault := o.FullTunnel || (family == windows.AF_INET6 && (blockV6 || v6Default))
-			cbs, err := monitorDefaultRoutes(family, binder, hasDefault, m.nativeTun, logf, m.netSwitched(family))
+			cbs, err := monitorDefaultRoutes(family, binder, hasDefault, false, m.nativeTun, logf, m.netSwitched(family))
 			if err != nil {
 				return fmt.Errorf("не удалось отследить основной сетевой интерфейс: %w", err)
 			}
@@ -290,14 +319,21 @@ func (t *tapTun) Write(bufs [][]byte, offset int) (int, error) {
 // netSwitched records a change of the physical interface and nudges the server at once, so it
 // learns the new address instead of waiting for the next keepalive.
 func (m *Manager) netSwitched(family winipcfg.AddressFamily) func(index uint32) {
-	dev := m.dev
+	dev := m.dev // nil in proxy mode: new connections simply take the new route
 	return func(index uint32) {
 		if family == windows.AF_INET {
 			m.noNet.Store(index == 0)
+			kind := ""
+			if luid, err := winipcfg.LUIDFromIndex(index); index != 0 && err == nil {
+				kind = kindOf(luid)
+			}
+			m.netKind.Store(kind)
 		}
 		if index != 0 {
 			m.netChanges.Add(1)
-			go dev.SendKeepalivesToPeersWithCurrentKeypair()
+			if dev != nil {
+				go dev.SendKeepalivesToPeersWithCurrentKeypair()
+			}
 		}
 	}
 }
@@ -325,6 +361,17 @@ func (m *Manager) teardownLocked() {
 		wfp.DisableFirewall()
 		m.firewall = false
 	}
+	if m.binder != nil {
+		xray.SetSocketHook(nil)
+		m.binder = nil
+	}
+	if m.proxy != nil {
+		m.proxy.Close() // also closes the TUN adapter
+		m.proxy = nil
+		m.nativeTun = nil
+	}
+	m.proxyEndpoint, m.proxyName = "", ""
+	m.proxyOK.Store(0)
 	if m.dev != nil {
 		m.dev.Close() // also closes the TUN adapter, which drops its routes and DNS
 		m.dev = nil
@@ -340,15 +387,27 @@ func (m *Manager) teardownLocked() {
 func (m *Manager) IsUp() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.dev != nil
+	return m.up()
 }
 
-// Stats reads counters from the device's UAPI.
+// Stats reads counters from the device's UAPI (or the proxy engine).
 func (m *Manager) Stats() Stats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	st := Stats{Up: m.dev != nil, Since: m.since, KillSwitch: m.firewall, IPv6Blocked: m.v6Blocked,
-		NetChanges: m.netChanges.Load(), NoNetwork: m.dev != nil && m.noNet.Load()}
+	st := Stats{Up: m.up(), Since: m.since, KillSwitch: m.firewall, IPv6Blocked: m.v6Blocked,
+		NetChanges: m.netChanges.Load(), NoNetwork: m.up() && m.noNet.Load()}
+	if k, ok := m.netKind.Load().(string); ok && m.up() {
+		st.NetKind = k
+	}
+	if m.proxy != nil {
+		st.Proxy, st.Endpoint, st.ServerName = true, m.proxyEndpoint, m.proxyName
+		st.RxBytes, st.TxBytes, _ = m.proxy.Counters()
+		// A proxy has no handshake of its own: the last request that went through the server stands in.
+		if t := m.proxyOK.Load(); t != 0 {
+			st.LastHandshake = time.Unix(0, t)
+		}
+		return st
+	}
 	if m.dev == nil {
 		return st
 	}
@@ -384,7 +443,7 @@ func (m *Manager) Stats() Stats {
 
 // bindSocketRoute binds the tunnel's UDP socket to the best physical default route so
 // encrypted traffic never loops back into the tunnel.
-func bindSocketRoute(family winipcfg.AddressFamily, binder conn.BindSocketToInterface, ourLUID winipcfg.LUID, lastLUID *winipcfg.LUID, lastIndex *uint32, blackholeWhenLoop bool, logf func(string, ...any), switched func(index uint32)) error {
+func bindSocketRoute(family winipcfg.AddressFamily, binder conn.BindSocketToInterface, ourLUID winipcfg.LUID, lastLUID *winipcfg.LUID, lastIndex *uint32, blackholeWhenLoop, physicalOnly bool, logf func(string, ...any), switched func(index uint32)) error {
 	r, err := winipcfg.GetIPForwardTable2(family)
 	if err != nil {
 		return err
@@ -392,6 +451,10 @@ func bindSocketRoute(family winipcfg.AddressFamily, binder conn.BindSocketToInte
 	lowestMetric := ^uint32(0)
 	index := uint32(0)
 	luid := winipcfg.LUID(0)
+	// With physicalOnly, another VPN's virtual adapter is used only when there is nothing else:
+	// that VPN binds its own socket to the best route besides itself, which is then this tunnel,
+	// and the two would carry each other in a loop.
+	virtMetric, virtIndex, virtLUID := ^uint32(0), uint32(0), winipcfg.LUID(0)
 	for i := range r {
 		if r[i].DestinationPrefix.PrefixLength != 0 || r[i].InterfaceLUID == ourLUID {
 			continue
@@ -404,11 +467,21 @@ func bindSocketRoute(family winipcfg.AddressFamily, binder conn.BindSocketToInte
 		if err != nil {
 			continue
 		}
-		if r[i].Metric+iface.Metric < lowestMetric {
-			lowestMetric = r[i].Metric + iface.Metric
+		m := r[i].Metric + iface.Metric
+		if physicalOnly && isVirtual(ifrow.Type) {
+			if m < virtMetric {
+				virtMetric, virtIndex, virtLUID = m, r[i].InterfaceIndex, r[i].InterfaceLUID
+			}
+			continue
+		}
+		if m < lowestMetric {
+			lowestMetric = m
 			index = r[i].InterfaceIndex
 			luid = r[i].InterfaceLUID
 		}
+	}
+	if index == 0 && virtIndex != 0 {
+		index, luid = virtIndex, virtLUID
 	}
 	if luid == *lastLUID && index == *lastIndex {
 		return nil
@@ -433,7 +506,7 @@ func bindSocketRoute(family winipcfg.AddressFamily, binder conn.BindSocketToInte
 	return binder.BindSocketToInterface6(index, blackhole)
 }
 
-func monitorDefaultRoutes(family winipcfg.AddressFamily, binder conn.BindSocketToInterface, blackholeWhenLoop bool, nt *tun.NativeTun, logf func(string, ...any), switched func(index uint32)) ([]interface{ Unregister() error }, error) {
+func monitorDefaultRoutes(family winipcfg.AddressFamily, binder conn.BindSocketToInterface, blackholeWhenLoop, physicalOnly bool, nt *tun.NativeTun, logf func(string, ...any), switched func(index uint32)) ([]interface{ Unregister() error }, error) {
 	ourLUID := winipcfg.LUID(nt.LUID())
 	lastLUID := winipcfg.LUID(0)
 	lastIndex := ^uint32(0)
@@ -441,11 +514,11 @@ func monitorDefaultRoutes(family winipcfg.AddressFamily, binder conn.BindSocketT
 	doIt := func() {
 		mu.Lock()
 		defer mu.Unlock()
-		if err := bindSocketRoute(family, binder, ourLUID, &lastLUID, &lastIndex, blackholeWhenLoop, logf, switched); err != nil {
+		if err := bindSocketRoute(family, binder, ourLUID, &lastLUID, &lastIndex, blackholeWhenLoop, physicalOnly, logf, switched); err != nil {
 			logf("не удалось переключить сетевой интерфейс: %v", err)
 		}
 	}
-	if err := bindSocketRoute(family, binder, ourLUID, &lastLUID, &lastIndex, blackholeWhenLoop, logf, switched); err != nil {
+	if err := bindSocketRoute(family, binder, ourLUID, &lastLUID, &lastIndex, blackholeWhenLoop, physicalOnly, logf, switched); err != nil {
 		return nil, err
 	}
 	debounce := time.AfterFunc(time.Hour, doIt)

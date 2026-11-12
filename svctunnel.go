@@ -13,6 +13,7 @@ func (t *svcTunnel) Up(o tunnel.Options) error {
 		RawConfig: o.RawConfig, AllowedIPs: o.AllowedIPs, FullTunnel: o.FullTunnel,
 		KillSwitch: o.KillSwitch, BlockIPv6: o.BlockIPv6, DNS: o.DNS, MTU: o.MTU,
 		Lockdown: o.Lockdown,
+		Proxy: o.Proxy, ProxyAddr: o.ProxyAddr,
 	})
 }
 

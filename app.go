@@ -18,23 +18,22 @@ import (
 
 	"awgpilot/internal/autostart"
 	"awgpilot/internal/flows"
-	"awgpilot/internal/geoip"
 	"awgpilot/internal/i18n"
 	"awgpilot/internal/ipc"
 	"awgpilot/internal/keyapi"
 	"awgpilot/internal/netstat"
-	"awgpilot/internal/netx"
 	"awgpilot/internal/remotecfg"
 	"awgpilot/internal/routing"
 	"awgpilot/internal/speedtest"
 	"awgpilot/internal/store"
+	"awgpilot/internal/subui"
 	"awgpilot/internal/tray"
 	"awgpilot/internal/tunnel"
 	"awgpilot/internal/usage"
 	"awgpilot/internal/vpnkey"
 )
 
-const appVersion = "0.9.1"
+const appVersion = "0.10.0"
 
 var dnsPresets = map[string][]string{
 	"cloudflare": {"1.1.1.1", "1.0.0.1"},
@@ -78,6 +77,7 @@ type App struct {
 	usage        *usage.Store
 	russiaStatus string // "N сетей, обновлён DD.MM.YYYY" after the list was loaded
 	speed        speedtest.Tracker
+	sub          subState // proxy subscriptions: server checks and recovery
 }
 
 // activateLocked derives per-profile state (decoded key, account data) from the active
@@ -172,7 +172,8 @@ func (a *App) startup(ctx context.Context) {
 	go a.monitor()
 	go a.watchdog()
 	go a.subscriptionWatcher()
-	if p := a.secrets.Active(); a.settings.AutoConnect && p != nil && p.RawConfig != "" {
+	go a.subUpdater()
+	if p := a.secrets.Active(); a.settings.AutoConnect && p != nil && p.Usable() {
 		go func() {
 			a.announce.Store(true)
 			if err := a.Connect(); err != nil {
@@ -328,6 +329,8 @@ type State struct {
 	SpeedTest    speedtest.State        `json:"speedtest"`
 	Lang         string                 `json:"lang"`      // interface language in effect: "ru" or "en"
 	OtherVPN     string                 `json:"other_vpn"` // adapter of another VPN that carries the traffic instead
+	Sub          *subui.View            `json:"sub"`       // the active profile's proxy subscription, if it is one
+	NetKind      string                 `json:"net_kind"`  // "wifi", "mobile", "wired" or ""
 }
 
 // ProfileInfo is a secret-free description of a profile.
@@ -339,6 +342,8 @@ type ProfileInfo struct {
 	Endpoint  string `json:"endpoint"`
 	HasConfig bool   `json:"has_config"`
 	ConfigFor string `json:"config_for"`
+	Sub       bool   `json:"sub"`     // a proxy subscription (or server links)
+	Servers   int    `json:"servers"` // its number of servers
 }
 
 // SpeedInfo is the live throughput and latency through the tunnel.
@@ -366,7 +371,10 @@ type ConfigInfo struct {
 }
 
 func profileInfo(p store.Profile) ProfileInfo {
-	pi := ProfileInfo{ID: p.ID, Name: p.Name, HasConfig: p.RawConfig != "", ConfigFor: p.ConfigFor}
+	pi := ProfileInfo{ID: p.ID, Name: p.Name, HasConfig: p.Usable(), ConfigFor: p.ConfigFor}
+	if p.Sub != nil {
+		pi.Sub, pi.Servers = true, len(p.Sub.Servers)
+	}
 	if k, err := vpnkey.Decode(p.VPNKey); err == nil {
 		pi.HasKey, pi.MaskedKey, pi.Endpoint = true, k.Masked(), k.APIEndpoint
 	}
@@ -375,6 +383,7 @@ func profileInfo(p store.Profile) ProfileInfo {
 
 func (a *App) GetState() State {
 	autostartOn := a.autorun.Load()
+	kind := tunnel.NetKind()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := State{
@@ -431,6 +440,11 @@ func (a *App) GetState() State {
 	}
 	if a.remote != nil {
 		s.Connections = a.remote.Connections
+	}
+	s.NetKind = kind
+	if p := a.secrets.Active(); p != nil && p.Sub != nil {
+		s.HasConfig = len(p.Sub.Servers) > 0
+		s.Sub = subui.New(p.Sub, kind, subui.Progress{Testing: a.sub.testing.Load(), Tested: int(a.sub.tested.Load()), Total: int(a.sub.total.Load())})
 	}
 	if p := a.secrets.Active(); p != nil && p.RawConfig != "" {
 		s.HasConfig, s.ConfigFor = true, p.ConfigFor
@@ -571,7 +585,7 @@ func (a *App) switchProfile(change func() error) error {
 	a.mu.Lock()
 	switched := a.secrets.ActiveID != before
 	p := a.secrets.Active()
-	canConnect := p != nil && p.RawConfig != ""
+	canConnect := p != nil && p.Usable()
 	a.mu.Unlock()
 	if switched {
 		a.trayProfiles()
@@ -600,6 +614,9 @@ func nativeKey(raw string, keyErr error) (*vpnkey.Native, error) {
 }
 
 func (a *App) AddKey(raw string) error {
+	if subui.IsLink(raw) {
+		return a.addSubscription(raw) // a subscription URL or vless://, trojan://, ss://, vmess:// links
+	}
 	k, err := vpnkey.Decode(raw)
 	if err != nil {
 		n, nerr := nativeKey(raw, err)
@@ -1138,12 +1155,18 @@ func (a *App) Connect() error {
 
 func (a *App) connectLocked() error {
 	a.mu.Lock()
-	var raw, profName string
+	var raw, profName, subID string
 	if p := a.secrets.Active(); p != nil {
 		raw, profName = p.RawConfig, p.Name
+		if p.Sub != nil {
+			subID = p.ID
+		}
 	}
 	settings := a.settings
 	a.mu.Unlock()
+	if subID != "" {
+		return a.connectSubLocked(subID, settings)
+	}
 	if raw == "" {
 		return errors.New("у профиля нет конфига: нажмите «Обновить конфиг» или импортируйте .conf")
 	}
@@ -1160,41 +1183,11 @@ func (a *App) connectLocked() error {
 			}
 		}
 	}
-	var bypass []netip.Prefix
-	if settings.Split.BypassRussia && settings.Split.Mode != routing.ModeInclude {
-		ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
-		list, err := geoip.Get(ctx, filepath.Join(a.st.Dir(), "ru-ipv4.txt"))
-		cancel()
-		switch {
-		case list == nil:
-			return fmt.Errorf("не удалось получить список российских сетей: %w", err)
-		case err != nil:
-			a.logf("список российских сетей: %v", err)
-		}
-		bypass = list.Prefixes
-		a.mu.Lock()
-		a.russiaStatus = fmt.Sprintf("%d сетей, обновлён %s", len(list.Prefixes), list.FetchedAt.Local().Format("02.01.2006"))
-		a.mu.Unlock()
-	}
-	ctx, cancel := a.reqCtx()
-	plan, err := routing.Compute(ctx, settings.Split, tunnelDNS, netx.Resolver, bypass)
-	cancel()
+	plan, err := a.routePlan(settings, tunnelDNS)
 	if err != nil {
 		return err
 	}
-	if len(bypass) > 0 {
-		a.logf("Россия мимо VPN: %d российских сетей напрямую, маршрутов через VPN: %d", len(bypass), len(plan.AllowedIPs))
-	}
 	a.logf("подключаюсь: профиль «%s»", profName)
-	a.mu.Lock()
-	a.warnings = plan.Warnings
-	a.mu.Unlock()
-	for _, w := range plan.Warnings {
-		a.logf("раздельный туннель: %s", w)
-	}
-	if settings.KillSwitch && !plan.FullTunnel {
-		a.logf("kill switch не действует, пока включён раздельный туннель или «локальная сеть мимо VPN»")
-	}
 	err = a.tun.Up(tunnel.Options{
 		RawConfig:  raw,
 		AllowedIPs: plan.AllowedIPs,

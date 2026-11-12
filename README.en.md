@@ -1,6 +1,6 @@
 # AWG Pilot
 
-**An AmneziaWG VPN client for Windows and Android** that keeps the connection alive by itself, shows where your traffic goes, and stays out of the way.
+**An AmneziaWG and VLESS VPN client for Windows and Android** that keeps the connection alive by itself, shows where your traffic goes, and stays out of the way.
 
 [Русская версия](README.md) · [Download](../../releases/latest)
 
@@ -10,6 +10,9 @@
 
 **Connection**
 - AmneziaWG 3.1 engine (compatible with AmneziaWG 2.0 servers).
+- VLESS, Trojan, Shadowsocks and VMess subscriptions (an `https://…` link from the provider's bot or account page; Remnawave, Marzban and 3x-ui formats) and single `vless://`, `trojan://`, `ss://`, `vmess://` links, run by Xray-core: REALITY, TLS, XTLS Vision, WebSocket, gRPC, XHTTP, ClientHello fragmenting.
+- Subscription servers: delay checks (a whole request through the server), groups (LTE, SMART, BRIDGE…), the provider's traffic, end date and announcements, automatic list updates.
+- A server per network: Wi-Fi, mobile internet and cable. When the network changes, AWG Pilot moves to the server for it (on mobile internet the LTE group by default). If a server stops answering, the others are checked at once and the VPN moves to the fastest one that works.
 - Works with keys starting with `vpn://` (so far tested with Sotka VPN keys) and with AmneziaVPN keys (`.vpn` files), plus AmneziaWG `.conf` files; several profiles side by side.
 - Self-healing link: the server is pinged every 5 seconds. When pings stop, AWG Pilot reconnects, reconnects again, fetches a fresh config, moves to the next profile, asks the provider for another server, and repeats the round until the link works. A Wi-Fi ↔ mobile switch is checked within seconds.
 
@@ -42,7 +45,7 @@ Download the files from [Releases](../../releases/latest).
 ## First steps
 
 1. Turn off any other VPN client that uses the same key: two clients with one key revoke each other's configs.
-2. Open AWG Pilot → **Keys and profiles** → paste a key or import a `.vpn` / `.conf` file.
+2. Open AWG Pilot → **Keys and profiles** → paste a `vpn://` key, an `https://…` subscription link or a `vless://…` link, or import a `.vpn` / `.conf` file.
 3. Press the power button. The status window and the traffic log are in **Settings** and **Statistics**.
 
 ## How it works
@@ -51,12 +54,12 @@ The same Go core runs on both platforms. On Windows a LocalSystem service owns t
 
 ## Build from source
 
-- **Windows:** Go 1.26, Node.js, [Wails v2](https://wails.io): `wails build -platform windows/amd64 -trimpath -ldflags "-s -w"`, add `-nsis` (NSIS 3) for the installer.
+- **Windows:** Go 1.27, Node.js, [Wails v2](https://wails.io): `wails build -platform windows/amd64 -trimpath -ldflags "-s -w"`, add `-nsis` (NSIS 3) for the installer.
 - **Android:** Android SDK (build-tools 36.1, platform 36), NDK 28, JDK 17+: `android\build.ps1`, no Gradle needed.
 
 ## Credits
 
-Built on [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go), [amneziawg-windows](https://github.com/amnezia-vpn/amneziawg-windows), [WinTun](https://www.wintun.net), [Wails](https://wails.io) and [gVisor](https://gvisor.dev). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Built on [amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go), [amneziawg-windows](https://github.com/amnezia-vpn/amneziawg-windows), [WinTun](https://www.wintun.net), [Xray-core](https://github.com/XTLS/Xray-core), [Wails](https://wails.io) and [gVisor](https://gvisor.dev). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 AWG Pilot is an independent project and is not affiliated with Amnezia, WireGuard or any VPN provider. WireGuard is a registered trademark of Jason A. Donenfeld.
 

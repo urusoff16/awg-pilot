@@ -37,6 +37,9 @@
 - `internal/remotecfg` — публичный конфиг провайдера (`api_base_url`, типы подключений).
 - `internal/routing` — вычисление AllowedIPs для раздельного туннеля.
 - `internal/tunnel` — `amneziawg-go` v3 (AmneziaWG 3.1, совместим с 2.0), wintun, маршруты, DNS и WFP из `amneziawg-windows` v0.2.0. Ключи AmneziaWG 3.x, которых не знает парсер `amneziawg-windows`, передаются в устройство отдельно (`internal/awgconf`).
+- `internal/xray` — движок подписок на Xray-core v26.11.9 (библиотекой, без изменений): разбор ссылок `vless://`, `trojan://`, `ss://`, `vmess://` в исходящие Xray (REALITY, TLS, Vision, WS, gRPC, XHTTP, `fm` — finalmask), проверка задержки запросом `http://cp.cloudflare.com/generate_204` через сервер, `Engine` — пакеты адаптера (WinTun или дескриптор `VpnService`) через собственный TCP/IP-стек Xray (`proxy/tun.NewStack`) в сервер. На Windows сокеты Xray привязываются к физическому интерфейсу (`IP_UNICAST_IF`, `bind_windows.go`) тем же монитором маршрутов, что и UDP-сокет AmneziaWG; на Android приложение и так вне своего VPN.
+- `internal/subscription` — загрузка подписки (base64 или текст со ссылками, заголовки `subscription-userinfo`, `profile-title`, `announce`, `support-url`, `profile-update-interval`, HWID — свой случайный ID AWG Pilot), группы серверов по имени (с учётом кириллических «двойников» латиницы: `LTЕ`, `SМART`), правила выбора сервера по виду сети (`auto`, `auto:LTE`, `auto:!LTE`, `server:ID`).
+- `internal/subui` — описание подписки для интерфейса (общее для Windows и Android; ссылки с учётными данными в интерфейс не уходят).
 - `internal/store` — настройки в `%APPDATA%\AWGPilot\settings.json`, секреты в `secrets.bin` (DPAPI).
 - `internal/wfp` — правила «программа только через VPN». Низкоуровневые типы и вызовы WFP скопированы из `amneziawg-windows/tunnel/firewall` (MIT, © WireGuard LLC).
 - `internal/tray` — иконка в трее (`fyne.io/systray` в отдельном потоке ОС).
@@ -65,11 +68,30 @@
 
 **Окошко статуса** (меню трея или Настройки → Запуск) — тот же exe с ключом `--widget`: маленькое окно поверх других без кнопки на панели задач. Зелёное — VPN работает (пинг, скорость), красное — связь прервана или интернет заблокирован, серое — VPN выключен. Данные берёт напрямую у службы, место на экране запоминает; двойной щелчок открывает программу.
 
+## Подписки VLESS и другие (Xray)
+
+Профиль с подпиской хранит ссылку, серверы, результаты проверок и правила по сетям в том же зашифрованном `secrets.bin`. Выбор сервера:
+
+1. Тип сети: Windows — по типу интерфейса основного маршрута (Wi-Fi, WWAN-модем; Ethernet от телефона по USB — RNDIS — считается мобильной сетью), Android — `NetworkCapabilities` сети по умолчанию (`Core.watchNetKind`).
+2. Правило для этой сети (по умолчанию: мобильная → группа LTE, если она есть в подписке; остальные → всё, кроме LTE).
+3. Текущий сервер остаётся, пока работает и подходит под правило; иначе — самый быстрый по свежей проверке (20 минут), без проверки — сначала проверка подходящих серверов.
+
+Связь проверяется запросом через сервер каждые 5 секунд (у прокси нет ICMP и рукопожатия; время последнего ответа заменяет рукопожатие для `internal/health`). Восстановление: переподключение к тому же серверу → разовая параллельная проверка подходящих серверов и переход на лучший работающий, дальше по очереди → свежий список у провайдера и полная проверка → другие профили → пауза и сначала. При смене сети с другим правилом VPN сразу переходит на сервер для новой сети.
+
+Живые проверки (ссылки не печатаются):
+
+```powershell
+$env:AWG_LINKS_FILE="<файл со ссылками vless://…, по одной в строке>"
+go test -tags live ./internal/xray -v -run "TestLiveLinks|TestLiveEngine"
+```
+
+`TestLiveEngine` прогоняет через настоящий сервер TCP (HTTP) и UDP (DNS) от пользовательского TCP/IP-стека — весь путь пакетов, кроме самого WinTun.
+
 ## Сборка
 
 ```powershell
 $env:PATH="D:\CLAUDE_CODE\tools\go\bin;D:\CLAUDE_CODE\tools\gopath\bin;$env:PATH"
-$env:GOPATH="D:\CLAUDE_CODE\tools\gopath"; $env:GOTOOLCHAIN="local"
+$env:GOPATH="D:\CLAUDE_CODE\tools\gopath"; $env:GOTOOLCHAIN="local"   # Go 1.27 (нужен Xray-core v26.11)
 wails build -platform windows/amd64 -trimpath -ldflags "-s -w"
 go test ./...
 ```

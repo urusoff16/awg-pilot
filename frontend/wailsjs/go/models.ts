@@ -196,6 +196,8 @@ export namespace main {
 	    endpoint: string;
 	    has_config: boolean;
 	    config_for: string;
+	    sub: boolean;
+	    servers: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProfileInfo(source);
@@ -210,6 +212,8 @@ export namespace main {
 	        this.endpoint = source["endpoint"];
 	        this.has_config = source["has_config"];
 	        this.config_for = source["config_for"];
+	        this.sub = source["sub"];
+	        this.servers = source["servers"];
 	    }
 	}
 	export class SpeedInfo {
@@ -274,6 +278,8 @@ export namespace main {
 	    speedtest: speedtest.State;
 	    lang: string;
 	    other_vpn: string;
+	    sub?: subui.View;
+	    net_kind: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new State(source);
@@ -306,6 +312,8 @@ export namespace main {
 	        this.speedtest = this.convertValues(source["speedtest"], speedtest.State);
 	        this.lang = source["lang"];
 	        this.other_vpn = source["other_vpn"];
+	        this.sub = this.convertValues(source["sub"], subui.View);
+	        this.net_kind = source["net_kind"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -551,6 +559,129 @@ export namespace store {
 
 }
 
+export namespace subui {
+	
+	export class Server {
+	    id: string;
+	    name: string;
+	    group: string;
+	    proto: string;
+	    host: string;
+	    port: number;
+	    ms: number;
+	    err: string;
+	    // Go type: time
+	    at: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new Server(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.group = source["group"];
+	        this.proto = source["proto"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.ms = source["ms"];
+	        this.err = source["err"];
+	        this.at = this.convertValues(source["at"], null);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class View {
+	    has_url: boolean;
+	    host: string;
+	    title: string;
+	    announce: string;
+	    support_url: string;
+	    web_page: string;
+	    used: number;
+	    total: number;
+	    expire: number;
+	    // Go type: time
+	    updated: any;
+	    update_hours: number;
+	    groups: string[];
+	    servers: Server[];
+	    rules: Record<string, string>;
+	    defaults: Record<string, string>;
+	    custom: Record<string, string>;
+	    current: string;
+	    net_kind: string;
+	    testing: boolean;
+	    tested: number;
+	    test_total: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new View(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.has_url = source["has_url"];
+	        this.host = source["host"];
+	        this.title = source["title"];
+	        this.announce = source["announce"];
+	        this.support_url = source["support_url"];
+	        this.web_page = source["web_page"];
+	        this.used = source["used"];
+	        this.total = source["total"];
+	        this.expire = source["expire"];
+	        this.updated = this.convertValues(source["updated"], null);
+	        this.update_hours = source["update_hours"];
+	        this.groups = source["groups"];
+	        this.servers = this.convertValues(source["servers"], Server);
+	        this.rules = source["rules"];
+	        this.defaults = source["defaults"];
+	        this.custom = source["custom"];
+	        this.current = source["current"];
+	        this.net_kind = source["net_kind"];
+	        this.testing = source["testing"];
+	        this.tested = source["tested"];
+	        this.test_total = source["test_total"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace tunnel {
 	
 	export class Stats {
@@ -566,6 +697,9 @@ export namespace tunnel {
 	    ipv6_blocked: boolean;
 	    net_changes: number;
 	    no_network: boolean;
+	    net_kind: string;
+	    proxy: boolean;
+	    server_name: string;
 	    blocked: boolean;
 	    lockdown: boolean;
 	    ping_ms: number;
@@ -587,6 +721,9 @@ export namespace tunnel {
 	        this.ipv6_blocked = source["ipv6_blocked"];
 	        this.net_changes = source["net_changes"];
 	        this.no_network = source["no_network"];
+	        this.net_kind = source["net_kind"];
+	        this.proxy = source["proxy"];
+	        this.server_name = source["server_name"];
 	        this.blocked = source["blocked"];
 	        this.lockdown = source["lockdown"];
 	        this.ping_ms = source["ping_ms"];

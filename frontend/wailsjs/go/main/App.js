@@ -66,6 +66,10 @@ export function NewDeviceID() {
   return window['go']['main']['App']['NewDeviceID']();
 }
 
+export function OpenSubLink(arg1) {
+  return window['go']['main']['App']['OpenSubLink'](arg1);
+}
+
 export function PickApp() {
   return window['go']['main']['App']['PickApp']();
 }
@@ -106,6 +110,10 @@ export function SetLanguage(arg1) {
   return window['go']['main']['App']['SetLanguage'](arg1);
 }
 
+export function SetServerRule(arg1, arg2) {
+  return window['go']['main']['App']['SetServerRule'](arg1, arg2);
+}
+
 export function SetSkin(arg1) {
   return window['go']['main']['App']['SetSkin'](arg1);
 }
@@ -126,6 +134,10 @@ export function SpeedTest() {
   return window['go']['main']['App']['SpeedTest']();
 }
 
+export function TestServers() {
+  return window['go']['main']['App']['TestServers']();
+}
+
 export function TrafficLog(arg1) {
   return window['go']['main']['App']['TrafficLog'](arg1);
 }
@@ -136,4 +148,12 @@ export function Translate(arg1) {
 
 export function Unlock() {
   return window['go']['main']['App']['Unlock']();
+}
+
+export function UpdateSubscription() {
+  return window['go']['main']['App']['UpdateSubscription']();
+}
+
+export function UseServer(arg1) {
+  return window['go']['main']['App']['UseServer'](arg1);
 }

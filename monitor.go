@@ -138,7 +138,7 @@ func (a *App) monitor() {
 				a.rec.connected = true
 				a.rec.mu.Unlock()
 				if first && a.announce.Swap(false) {
-					a.notify("VPN подключён", "Сервер "+hostOf(st.Endpoint), "")
+					a.notify("VPN подключён", "Сервер "+serverLabel(st), "")
 				}
 			}
 		} else {
@@ -180,6 +180,14 @@ func (a *App) pullServiceLogs(next *int) {
 	*next = n
 }
 
+// serverLabel names the server for messages: a subscription server by its name.
+func serverLabel(st tunnel.Stats) string {
+	if st.ServerName != "" {
+		return st.ServerName
+	}
+	return hostOf(st.Endpoint)
+}
+
 func hostOf(endpoint string) string {
 	host, _, _ := strings.Cut(endpoint, ":")
 	if host == "" {
@@ -192,13 +200,13 @@ func (a *App) updateTray(st tunnel.Stats) {
 	if a.tray == nil {
 		return
 	}
-	up, endpoint, hs := st.Up, st.Endpoint, st.LastHandshake
+	up, hs := st.Up, st.LastHandshake
 	tip := "AWG Pilot — отключено"
 	if st.Blocked {
 		tip = "AWG Pilot — интернет заблокирован\nVPN оборвался, идёт восстановление"
 	}
 	if up {
-		tip = "AWG Pilot — подключено\nСервер " + hostOf(endpoint)
+		tip = "AWG Pilot — подключено\nСервер " + serverLabel(st)
 		if last, _ := a.meter.Snapshot(); last.T != 0 {
 			tip += fmt.Sprintf("\n↓ %s/с  ↑ %s/с", humanBytes(last.Rx), humanBytes(last.Tx))
 		}
@@ -239,6 +247,7 @@ func (a *App) watchdog() {
 		a.mu.Lock()
 		enabled, autoChange, hasKey := a.settings.Reconnect, a.settings.AutoChangeServer, a.key != nil
 		activeID, profiles := a.secrets.ActiveID, len(a.secrets.Profiles)
+		isSub := a.secrets.Active() != nil && a.secrets.Active().Sub != nil
 		a.mu.Unlock()
 		st := a.tun.Stats()
 		if !st.Up {
@@ -249,9 +258,11 @@ func (a *App) watchdog() {
 		}
 		now := time.Now()
 		a.rec.mu.Lock()
+		netChanged := false
 		if st.NetChanges != a.rec.netChanges {
 			if a.rec.netSeen { // the first reading is only the baseline
 				a.rec.netChangedAt = now
+				netChanged = true
 				a.logf("сеть сменилась — проверяю связь с сервером")
 			}
 			a.rec.netChanges = st.NetChanges
@@ -262,6 +273,10 @@ func (a *App) watchdog() {
 		stage, actionAt := a.rec.stage, a.rec.actionAt
 		moreProfiles := a.rec.failovers < profiles-1
 		a.rec.mu.Unlock()
+		if isSub && netChanged && enabled {
+			a.subNetChanged(st.NetKind) // Wi-Fi ↔ mobile: maybe another server for the new network
+			continue
+		}
 
 		dead, why := health.Dead(in)
 		if !dead {
@@ -269,6 +284,9 @@ func (a *App) watchdog() {
 				a.rec.mu.Lock()
 				a.rec.stage, a.rec.failovers, a.rec.blockedNotified = 0, 0, false
 				a.rec.mu.Unlock()
+				a.sub.mu.Lock()
+				a.sub.failed = nil
+				a.sub.mu.Unlock()
 				a.logf("соединение восстановлено")
 				a.notify("Соединение восстановлено", "VPN снова работает", "")
 				if al := a.alert.Load(); al != nil && al.Kind == "server_down" {
@@ -282,6 +300,10 @@ func (a *App) watchdog() {
 		}
 		if st.NoNetwork {
 			continue // no Wi-Fi or cable at all: wait for a network instead of burning through steps
+		}
+		if isSub {
+			a.subRecover(stage, why, profiles, st.LastHandshake.IsZero())
+			continue
 		}
 
 		step := health.Plan(stage, hasKey, moreProfiles)
@@ -401,13 +423,13 @@ func (a *App) selectNextProfile() (name string, needConfig, ok bool) {
 	}
 	for i := 1; i < n; i++ {
 		p := a.secrets.Profiles[(cur+i)%n]
-		if p.RawConfig == "" && p.VPNKey == "" {
+		if !p.Usable() && p.VPNKey == "" {
 			continue
 		}
 		a.secrets.ActiveID = p.ID
 		a.activateLocked()
 		a.saveSecrets()
-		return p.Name, p.RawConfig == "", true
+		return p.Name, !p.Usable(), true
 	}
 	return "", false, false
 }

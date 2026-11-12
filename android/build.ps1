@@ -1,8 +1,8 @@
 # Builds AWG Pilot for Android without Gradle: Go core (NDK) -> web UI (Vite) -> aapt2 -> javac -> d8 -> zip -> zipalign -> apksigner.
 # Output: build\android\awgpilot-<version>.apk
 param(
-    [string]$Version = "0.9.1",
-    [int]$VersionCode = 901,
+    [string]$Version = "0.10.0",
+    [int]$VersionCode = 1000,
     [string[]]$Abis = @("arm64-v8a", "armeabi-v7a", "x86_64"),
     [string]$SigningDir = "D:\CLAUDE_CODE\tools\awgpilot-signing"
 )
@@ -42,7 +42,7 @@ try {
         $env:CGO_ENABLED = "1"; $env:GOOS = "android"; $env:GOARCH = $t.GOARCH; $env:GOARM = $t.GOARM
         $env:CC = Join-Path $ndkBin $t.CC
         New-Item -ItemType Directory -Force "$out\lib\$abi" | Out-Null
-        go build -buildmode=c-shared -trimpath -ldflags "-s -w -buildid= -extldflags=-Wl,-z,max-page-size=16384" -o "$out\lib\$abi\libawgpilot.so" ./mobile
+        go build -buildmode=c-shared -trimpath -ldflags "-s -w -buildid= -checklinkname=0 -extldflags=-Wl,-z,max-page-size=16384" -o "$out\lib\$abi\libawgpilot.so" ./mobile
         Check "go build ($abi)"
         Remove-Item "$out\lib\$abi\libawgpilot.h"
     }

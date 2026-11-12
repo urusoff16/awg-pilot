@@ -29,11 +29,12 @@ import (
 	"awgpilot/internal/routing"
 	"awgpilot/internal/speedtest"
 	"awgpilot/internal/store"
+	"awgpilot/internal/subui"
 	"awgpilot/internal/usage"
 	"awgpilot/internal/vpnkey"
 )
 
-const appVersion = "0.9.1"
+const appVersion = "0.10.0"
 
 var dnsPresets = map[string][]string{
 	"cloudflare": {"1.1.1.1", "1.0.0.1"},
@@ -82,6 +83,8 @@ type Stats struct {
 	Blocked       bool      `json:"blocked"`
 	PingMs        int64     `json:"ping_ms"`
 	PingFails     int       `json:"ping_fails"`
+	Proxy         bool      `json:"proxy"`       // through a subscription server (Xray)
+	ServerName    string    `json:"server_name"` // that server's name
 }
 
 type App struct {
@@ -101,7 +104,9 @@ type App struct {
 	deviceSrc string
 
 	tunOp sync.Mutex // serializes connect/disconnect
-	tun   *tunnel
+	tun   vpnTunnel
+	kind  atomic.Value // string: the phone's network ("wifi", "mobile", "wired"), from Android
+	sub   subState
 	logs  logRing
 	stop  chan struct{}
 
@@ -164,6 +169,7 @@ func newApp(plat Platform, dir string, sdk int, trace func(string)) (*App, error
 	go a.monitor()
 	go a.watchdog()
 	go a.subscriptionWatcher()
+	go a.subUpdater()
 	return a, nil
 }
 
@@ -263,6 +269,8 @@ type State struct {
 	SDK          int                    `json:"sdk"`
 	SpeedTest    speedtest.State        `json:"speedtest"`
 	Lang         string                 `json:"lang"` // interface language in effect: "ru" or "en"
+	Sub          *subui.View            `json:"sub"`  // the active profile's proxy subscription, if it is one
+	NetKind      string                 `json:"net_kind"`
 }
 
 type ProfileInfo struct {
@@ -273,6 +281,8 @@ type ProfileInfo struct {
 	Endpoint  string `json:"endpoint"`
 	HasConfig bool   `json:"has_config"`
 	ConfigFor string `json:"config_for"`
+	Sub       bool   `json:"sub"`
+	Servers   int    `json:"servers"`
 }
 
 type SpeedInfo struct {
@@ -316,7 +326,10 @@ func (a *App) GetState() State {
 		ServiceOK: true, Version: appVersion, RussiaList: a.russiaStatus, SDK: a.sdk,
 	}
 	for _, p := range a.secrets.Profiles {
-		pi := ProfileInfo{ID: p.ID, Name: p.Name, HasConfig: p.RawConfig != "", ConfigFor: p.ConfigFor}
+		pi := ProfileInfo{ID: p.ID, Name: p.Name, HasConfig: p.Usable(), ConfigFor: p.ConfigFor}
+		if p.Sub != nil {
+			pi.Sub, pi.Servers = true, len(p.Sub.Servers)
+		}
 		if k, err := vpnkey.Decode(p.VPNKey); err == nil {
 			pi.HasKey, pi.MaskedKey, pi.Endpoint = true, k.Masked(), k.APIEndpoint
 		}
@@ -353,6 +366,12 @@ func (a *App) GetState() State {
 	}
 	if a.remote != nil {
 		s.Connections = a.remote.Connections
+	}
+	s.NetKind = a.netKind()
+	if p := a.secrets.Active(); p != nil && p.Sub != nil {
+		s.HasConfig = len(p.Sub.Servers) > 0
+		s.Sub = subui.New(p.Sub, a.currentKind(), subui.Progress{Testing: a.sub.testing.Load(), Tested: int(a.sub.tested.Load()), Total: int(a.sub.total.Load())})
+		s.Sub.NetKind = s.NetKind
 	}
 	if p := a.secrets.Active(); p != nil && p.RawConfig != "" {
 		s.HasConfig, s.ConfigFor = true, p.ConfigFor
@@ -444,19 +463,19 @@ func (a *App) SpeedTest() error {
 	if t == nil {
 		return errors.New("сначала подключите VPN")
 	}
-	st, err := t.pt.startStack(t.mtu)
+	dial, done, err := t.speedDialer()
 	if err != nil {
 		return fmt.Errorf("тест скорости не запустился: %w", err)
 	}
-	if !a.speed.Start(st.Dial, func(r speedtest.Result, err error) {
-		t.pt.stopStack(st)
+	if !a.speed.Start(dial, func(r speedtest.Result, err error) {
+		done()
 		if err != nil {
 			a.logf("тест скорости не удался: %v", err)
 			return
 		}
 		a.logf("тест скорости через VPN (IP %s, %s): загрузка %.1f Мбит/с, отдача %.1f Мбит/с", r.IP, r.Loc, r.DownMbps, r.UpMbps)
 	}) {
-		t.pt.stopStack(st)
+		done()
 		return errors.New("тест скорости уже идёт")
 	}
 	a.logf("тест скорости через VPN запущен")
@@ -496,7 +515,7 @@ func (a *App) switchProfile(change func() error) error {
 	a.mu.Lock()
 	switched := a.secrets.ActiveID != before
 	p := a.secrets.Active()
-	canConnect := p != nil && p.RawConfig != ""
+	canConnect := p != nil && p.Usable()
 	a.mu.Unlock()
 	if !wasUp || !switched {
 		return nil
@@ -521,6 +540,9 @@ func nativeKey(raw string, keyErr error) (*vpnkey.Native, error) {
 }
 
 func (a *App) AddKey(raw string) error {
+	if subui.IsLink(raw) {
+		return a.addSubscription(raw) // a subscription URL or vless://, trojan://, ss://, vmess:// links
+	}
 	k, err := vpnkey.Decode(raw)
 	if err != nil {
 		n, nerr := nativeKey(raw, err)
@@ -884,6 +906,22 @@ func (a *App) buildPlan() (Plan, *awgconf.Config, string, error) {
 		plan.DNS = append(plan.DNS, d.String())
 	}
 
+	var v6 []netip.Prefix
+	for _, p := range cfg.Peer.AllowedIPs {
+		if p.Addr().Is6() {
+			v6 = append(v6, p)
+		}
+	}
+	if err := a.addRoutes(&plan, s, dns, hasV6, v6); err != nil {
+		return Plan{}, nil, "", err
+	}
+	return plan, cfg, profName, nil
+}
+
+// addRoutes fills plan's routes from the split settings: everything not excluded goes into the
+// tunnel, the tunnel DNS always does. hasV6: the provider issued an IPv6 address, whose ranges
+// (v6) go through the tunnel as the config says.
+func (a *App) addRoutes(plan *Plan, s store.Settings, dns []netip.Addr, hasV6 bool, v6 []netip.Prefix) error {
 	// Routes: everything not excluded goes into the tunnel; the tunnel DNS always does.
 	ctx, cancel := reqCtx()
 	entries, warns := resolveEntries(ctx, s.Split.Entries)
@@ -898,7 +936,7 @@ func (a *App) buildPlan() (Plan, *awgconf.Config, string, error) {
 	mode := s.Split.Mode
 	if mode == routing.ModeInclude {
 		if len(entries) == 0 {
-			return Plan{}, nil, "", errors.New("в режиме «только список» нужен хотя бы один адрес или домен")
+			return errors.New("в режиме «только список» нужен хотя бы один адрес или домен")
 		}
 		for _, p := range routing.Merge(append(entries, keep...)) {
 			plan.Routes = append(plan.Routes, p.String())
@@ -916,7 +954,7 @@ func (a *App) buildPlan() (Plan, *awgconf.Config, string, error) {
 			cancel()
 			switch {
 			case list == nil:
-				return Plan{}, nil, "", fmt.Errorf("не удалось получить список российских сетей: %w", err)
+				return fmt.Errorf("не удалось получить список российских сетей: %w", err)
 			case err != nil:
 				a.logf("список российских сетей: %v", err)
 			}
@@ -947,11 +985,9 @@ func (a *App) buildPlan() (Plan, *awgconf.Config, string, error) {
 		// A provider-issued IPv6 address: IPv6 goes through the tunnel as the config says
 		// (the split plan covers IPv4 only), never straight to the phone's network.
 		v6Default := false
-		for _, p := range cfg.Peer.AllowedIPs {
-			if p.Addr().Is6() {
-				plan.Routes = append(plan.Routes, p.String())
-				v6Default = v6Default || p.Bits() == 0
-			}
+		for _, p := range v6 {
+			plan.Routes = append(plan.Routes, p.String())
+			v6Default = v6Default || p.Bits() == 0
 		}
 		if s.BlockIPv6 && !v6Default {
 			plan.Routes = append(plan.Routes, "::/0") // the rest of IPv6 is dropped inside the tunnel
@@ -966,7 +1002,7 @@ func (a *App) buildPlan() (Plan, *awgconf.Config, string, error) {
 	for _, w := range warns {
 		a.logf("раздельный туннель: %s", w)
 	}
-	return plan, cfg, profName, nil
+	return nil
 }
 
 // hasIPv6 reports whether the provider issued an IPv6 interface address.
@@ -1036,6 +1072,15 @@ func (a *App) Connect() error {
 // connectLocked (re)builds the VPN interface and starts a fresh device on it. A running tunnel
 // is replaced in place, so the VPN key icon never drops while reconnecting.
 func (a *App) connectLocked() error {
+	a.mu.Lock()
+	subID := ""
+	if p := a.secrets.Active(); p != nil && p.Sub != nil {
+		subID = p.ID
+	}
+	a.mu.Unlock()
+	if subID != "" {
+		return a.connectSubLocked(subID)
+	}
 	plan, cfg, profName, err := a.buildPlan()
 	if err != nil {
 		return err
@@ -1314,6 +1359,19 @@ func (a *App) Call(method, args string) string {
 	case "NetworkLost":
 		a.NetworkLost()
 		return reply(nil, nil)
+	case "SetNetKind":
+		a.SetNetKind(str(0))
+		return reply(nil, nil)
+	case "TestServers":
+		return reply(nil, a.TestServers())
+	case "UpdateSubscription":
+		return reply(nil, a.UpdateSubscription())
+	case "SetServerRule":
+		return reply(nil, a.SetServerRule(str(0), str(1)))
+	case "UseServer":
+		return reply(nil, a.UseServer(str(0)))
+	case "SubLink":
+		return reply(a.SubLink(str(0)))
 	}
 	return reply(nil, fmt.Errorf("неизвестный метод %s", method))
 }

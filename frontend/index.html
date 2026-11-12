@@ -36,6 +36,10 @@
         <symbol id="i-save" viewBox="0 0 24 24"><path d="M12 3.5v11M7.5 10l4.5 4.5 4.5-4.5"/><path d="M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></symbol>
         <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.2 17.5a9 9 0 1 1 15.6 0"/><path d="M12 13.5l4.2-4.2"/><circle cx="12" cy="13.5" r="1.4"/></symbol>
         <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.5 5.2 3.5 8.5s-1.1 6.1-3.5 8.5c-2.4-2.4-3.5-5.2-3.5-8.5s1.1-6.1 3.5-8.5z"/></symbol>
+        <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3 9.5a13 13 0 0 1 18 0M6 13a8 8 0 0 1 12 0M9 16.5a3.6 3.6 0 0 1 6 0"/><circle cx="12" cy="19.3" r=".9"/></symbol>
+        <symbol id="i-cell" viewBox="0 0 24 24"><path d="M5 19v-3M9.5 19v-6M14 19v-9.5M18.5 19V5"/></symbol>
+        <symbol id="i-cable" viewBox="0 0 24 24"><rect x="7" y="3.5" width="10" height="8" rx="1.5"/><path d="M10 3.5v3M14 3.5v3M12 11.5v9"/></symbol>
     </defs>
 </svg>
 
@@ -109,6 +113,19 @@
                 <div class="wide"><span id="stAppsK">Программы только через VPN</span><b id="stApps">—</b></div>
             </div>
 
+            <div id="subCard" class="group subcard hidden">
+                <div class="subhead">
+                    <span id="subNet" class="netchip"></span>
+                    <label class="sel">Сервер <select id="selRuleNow"></select></label>
+                    <span class="grow"></span>
+                    <button id="btnSubTest" class="ghost sm" title="Проверить, какие серверы отвечают и как быстро"><svg><use href="#i-pulse"/></svg><span id="subTestText">Проверить</span></button>
+                    <button id="btnSubUpdate" class="ghost sm" title="Скачать свежий список серверов у провайдера"><svg><use href="#i-refresh"/></svg>Обновить</button>
+                </div>
+                <div id="subAnnounce" class="announce hidden"></div>
+                <ul id="srvList" class="list srvlist"></ul>
+                <div class="hint">Задержка — полный запрос через сервер (подключение, рукопожатие, ответ). Нажмите на сервер, чтобы подключаться через него в этой сети.</div>
+            </div>
+
             <div class="row center">
                 <label class="sel">Страна <select id="selCountry"><option value="">По умолчанию</option></select></label>
                 <label class="sel">Режим <select id="selKeyType"><option value="">Умный режим</option></select></label>
@@ -124,17 +141,31 @@
                 <div class="gt">Профили</div>
                 <ul id="profList" class="list"></ul>
                 <div class="row">
-                    <input id="inpKey" class="grow mono" type="password" placeholder="Вставьте ключ vpn://…" autocomplete="off" spellcheck="false"/>
+                    <input id="inpKey" class="grow mono" type="password" placeholder="Ключ vpn://, ссылка на подписку или vless://…" autocomplete="off" spellcheck="false"/>
                     <button id="btnSaveKey"><svg><use href="#i-plus"/></svg>Добавить</button>
                 </div>
                 <div class="row">
                     <button id="btnImportFile" class="ghost"><svg><use href="#i-file"/></svg>Импорт .conf / .vpn</button>
                     <button id="btnExport" class="ghost"><svg><use href="#i-save"/></svg>Экспорт .conf</button>
                 </div>
-                <div class="hint">Каждый ключ или конфиг — отдельный профиль. <span class="desk-only">Хранятся только на этом ПК, зашифрованы Windows DPAPI. Переключать можно и из трея.</span><span class="android-only">Хранятся только на этом телефоне, зашифрованы ключом из Android Keystore.</span></div>
+                <div class="hint">Подписки VLESS, Trojan, Shadowsocks и VMess (ссылка https://… из бота или личного кабинета провайдера) работают через движок Xray. Каждый ключ, конфиг или подписка — отдельный профиль. <span class="desk-only">Хранятся только на этом ПК, зашифрованы Windows DPAPI. Переключать можно и из трея.</span><span class="android-only">Хранятся только на этом телефоне, зашифрованы ключом из Android Keystore.</span></div>
             </div>
 
-            <div class="group">
+            <div id="subInfoGroup" class="group hidden">
+                <div class="gt">Подписка</div>
+                <div id="subInfo" class="card kv"></div>
+                <div class="row" id="subLinks"></div>
+            </div>
+
+            <div id="subRulesGroup" class="group hidden">
+                <div class="gt">Выбор сервера по сети</div>
+                <div class="field"><span><svg class="ni"><use href="#i-wifi"/></svg>Wi-Fi</span><select id="selRuleWifi" data-kind="wifi"></select></div>
+                <div class="field"><span><svg class="ni"><use href="#i-cell"/></svg>Мобильный интернет</span><select id="selRuleMobile" data-kind="mobile"></select></div>
+                <div class="field"><span><svg class="ni"><use href="#i-cable"/></svg>Кабель</span><select id="selRuleWired" data-kind="wired"></select></div>
+                <div class="hint">При смене сети AWG Pilot сам переходит на сервер для неё. Если выбранные серверы не отвечают, по очереди пробуются остальные — от самого быстрого. Телефон, раздающий интернет по USB, считается мобильной сетью.</div>
+            </div>
+
+            <div id="keyGroup" class="group">
                 <div class="gt">Подписка</div>
                 <div id="keyInfo" class="hint mono-hint"></div>
                 <div id="account" class="card kv"></div>

@@ -6,6 +6,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -23,6 +24,7 @@ import (
 	"awgpilot/internal/procnet"
 	"awgpilot/internal/tunnel"
 	"awgpilot/internal/wfp"
+	"awgpilot/internal/xray"
 )
 
 // Name is the Windows service name registered by the installer.
@@ -157,6 +159,7 @@ func (b *backend) Up(p ipc.UpParams) error {
 	err := b.tun.Up(tunnel.Options{
 		RawConfig: p.RawConfig, AllowedIPs: p.AllowedIPs, FullTunnel: p.FullTunnel,
 		KillSwitch: p.KillSwitch, BlockIPv6: p.BlockIPv6, DNS: p.DNS, MTU: p.MTU,
+		Proxy: p.Proxy, ProxyAddr: p.ProxyAddr,
 		Logf: b.logf,
 	})
 	if err != nil {
@@ -180,6 +183,9 @@ func (b *backend) Up(p ipc.UpParams) error {
 	b.pingTarget.Store(pingTarget(p))
 	b.pingMs.Store(-1)
 	b.pingFails.Store(0)
+	if p.Proxy != "" {
+		go b.pingOnce() // a proxy has no handshake: the first check through it shows it works
+	}
 	if err := b.applyApps(); err != nil {
 		b.Down(false) // keeps an armed lockdown closed while the tunnel goes away
 		return fmt.Errorf("туннель отключён, потому что не удалось применить правила для программ: %w", err)
@@ -190,7 +196,7 @@ func (b *backend) Up(p ipc.UpParams) error {
 // pingTarget is the tunnel's DNS server: always routed through the tunnel.
 func pingTarget(p ipc.UpParams) netip.Addr {
 	dns := p.DNS
-	if len(dns) == 0 {
+	if len(dns) == 0 && p.Proxy == "" {
 		if cfg, err := tunnel.ParseConfig(p.RawConfig); err == nil {
 			for _, d := range cfg.Interface.DNS {
 				if a, ok := netip.AddrFromSlice(d); ok {
@@ -317,18 +323,50 @@ func (b *backend) pinger(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		target, ok := b.pingTarget.Load().(netip.Addr)
-		if !ok || !target.IsValid() || !b.tun.IsUp() {
-			continue
+		b.pingOnce()
+	}
+}
+
+// pingOnce measures the round trip through the tunnel once: an ICMP echo to the tunnel's DNS
+// server for AmneziaWG, a request through the server for a subscription server (Xray carries
+// no ICMP).
+func (b *backend) pingOnce() {
+	if !b.tun.IsUp() {
+		return
+	}
+	var rtt time.Duration
+	var err error
+	if b.tun.IsProxy() {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		rtt, err = b.tun.ProbeProxy(ctx)
+		cancel()
+		if errors.Is(err, context.Canceled) {
+			return
 		}
-		if rtt, err := netstat.Ping(target, 2*time.Second); err == nil {
-			b.pingMs.Store(rtt.Milliseconds())
-			b.pingFails.Store(0)
-		} else {
-			b.pingMs.Store(-1)
-			b.pingFails.Add(1)
+	} else {
+		target, ok := b.pingTarget.Load().(netip.Addr)
+		if !ok || !target.IsValid() {
+			return
+		}
+		rtt, err = netstat.Ping(target, 2*time.Second)
+	}
+	if err == nil {
+		b.pingMs.Store(max(rtt.Milliseconds(), 1))
+		b.pingFails.Store(0)
+	} else {
+		b.pingMs.Store(-1)
+		if b.pingFails.Add(1) == 1 && b.tun.IsProxy() {
+			b.logf("проверка связи через сервер не прошла: %v", err)
 		}
 	}
+}
+
+// TestServers measures subscription servers straight over the physical network: while a proxy
+// tunnel runs, Xray's sockets are pinned to the physical interface.
+func (b *backend) TestServers(links []string) []xray.Result {
+	var res []xray.Result
+	b.tun.WithPhysicalSockets(func() { res = xray.TestAll(context.Background(), links, 8, 6*time.Second, nil) })
+	return res
 }
 
 // shutdown runs when the service stops: the tunnel goes, but a requested lockdown is kept by

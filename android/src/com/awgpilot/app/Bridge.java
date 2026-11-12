@@ -52,6 +52,23 @@ final class Bridge {
                             error -> act.reply(id, error == null ? ok() : err(error)));
                     return;
                 }
+                case "OpenSubLink": {
+                    // only links that came in the subscription's headers (support chat, web page)
+                    JSONObject r = new JSONObject(Core.call("SubLink", args));
+                    if (!r.optBoolean("ok")) {
+                        act.reply(id, r.toString());
+                        return;
+                    }
+                    android.net.Uri uri = android.net.Uri.parse(r.getString("result"));
+                    act.runOnUiThread(() -> {
+                        try {
+                            act.startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                        } catch (Exception ignored) {
+                        }
+                    });
+                    act.reply(id, ok());
+                    return;
+                }
                 case "OpenVpnSettings":
                     act.runOnUiThread(() -> act.startActivity(new Intent(Settings.ACTION_VPN_SETTINGS)));
                     act.reply(id, ok());

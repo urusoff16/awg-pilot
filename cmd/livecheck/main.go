@@ -3,6 +3,7 @@
 //
 //	livecheck api      -key-file <file with vpn:// key> [-download]   (uses AWG Pilot's own device ID)
 //	livecheck tunnel   -conf <AmneziaWG .conf> [-log <file>]      (needs administrator rights)
+//	livecheck proxy    -links <file with vless:// links> [-kill]  (through the installed service)
 package main
 
 import (
@@ -66,6 +67,8 @@ func main() {
 		apiCheck(os.Args[2:])
 	case "tunnel":
 		tunnelCheck(os.Args[2:])
+	case "proxy":
+		proxyCheck(os.Args[2:])
 	default:
 		fmt.Println("unknown command")
 		os.Exit(2)

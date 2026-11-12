@@ -67,7 +67,7 @@ func newTunStack(local netip.Addr, mtu int, out func([]byte) bool) (*tunStack, e
 	go func() { // outbound packets from the stack go into the tunnel
 		for {
 			pkt := ep.ReadContext(ctx)
-			if pkt.IsNil() {
+			if pkt == nil {
 				return
 			}
 			v := pkt.ToView()

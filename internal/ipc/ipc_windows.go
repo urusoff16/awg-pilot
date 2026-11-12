@@ -19,7 +19,11 @@ import (
 
 	"awgpilot/internal/flows"
 	"awgpilot/internal/tunnel"
+	"awgpilot/internal/xray"
 )
+
+// maxTestLinks bounds one "test" request; the window sends larger lists in parts.
+const maxTestLinks = 16
 
 // PipePath is the service's control pipe.
 const PipePath = `\\.\pipe\AWGPilot`
@@ -39,10 +43,13 @@ type UpParams struct {
 	MTU        int            `json:"mtu"`
 	// Lockdown keeps the internet closed if the tunnel drops (until a manual disconnect).
 	Lockdown bool `json:"lockdown"`
+	// Proxy is a subscription server's share link: the tunnel goes through it with Xray.
+	Proxy     string `json:"proxy,omitempty"`
+	ProxyAddr string `json:"proxy_addr,omitempty"`
 }
 
 type Request struct {
-	Op    string    `json:"op"` // version, up, down, stats, apps, logs, unlock, flows, flowlog, flowclear
+	Op    string    `json:"op"` // version, up, down, stats, apps, logs, unlock, flows, flowlog, flowclear, test
 	Up    *UpParams `json:"up,omitempty"`
 	Apps  []string  `json:"apps,omitempty"`
 	Since int       `json:"since,omitempty"`
@@ -50,6 +57,9 @@ type Request struct {
 	Release bool   `json:"release,omitempty"`
 	Day     string `json:"day,omitempty"` // flows: which day ("" = today)
 	On      bool   `json:"on,omitempty"`  // flowlog: record or not
+	// Links are subscription servers to measure (test). The service measures them because only it
+	// can send around a running tunnel, straight over the physical network.
+	Links []string `json:"links,omitempty"`
 }
 
 type Response struct {
@@ -59,6 +69,7 @@ type Response struct {
 	Logs    []string      `json:"logs,omitempty"`
 	Next    int           `json:"next,omitempty"`
 	Flows   *flows.Report `json:"flows,omitempty"`
+	Results []xray.Result `json:"results,omitempty"`
 }
 
 // Backend is what the service exposes over the pipe.
@@ -72,6 +83,7 @@ type Backend interface {
 	Flows(day string) flows.Report
 	SetFlowLog(on bool) error
 	ClearFlows() error
+	TestServers(links []string) []xray.Result
 }
 
 // ---- server -------------------------------------------------------------------------------
@@ -154,6 +166,11 @@ func dispatch(req Request, b Backend, version string) Response {
 			return Response{Error: err.Error()}
 		}
 		return Response{}
+	case "test":
+		if len(req.Links) > maxTestLinks {
+			return Response{Error: "слишком много серверов в одной проверке"}
+		}
+		return Response{Results: b.TestServers(req.Links)}
 	}
 	return Response{Error: "неизвестная команда " + req.Op}
 }
@@ -307,4 +324,17 @@ func (c *Client) SetFlowLog(on bool) error {
 func (c *Client) ClearFlows() error {
 	_, err := c.call(Request{Op: "flowclear"}, 10*time.Second)
 	return err
+}
+
+// TestServers measures subscription servers (at most maxTestLinks per call) and returns one
+// result per link, in order.
+func (c *Client) TestServers(links []string) ([]xray.Result, error) {
+	r, err := c.call(Request{Op: "test", Links: links}, 2*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	if len(r.Results) != len(links) {
+		return nil, errors.New("служба не умеет проверять серверы подписки — обновите программу")
+	}
+	return r.Results, nil
 }

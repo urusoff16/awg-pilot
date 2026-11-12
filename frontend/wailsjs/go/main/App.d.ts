@@ -37,6 +37,8 @@ export function ImportConfigFile():Promise<void>;
 
 export function NewDeviceID():Promise<void>;
 
+export function OpenSubLink(arg1:string):Promise<void>;
+
 export function PickApp():Promise<string>;
 
 export function Quit():Promise<void>;
@@ -57,6 +59,8 @@ export function SetAutostart(arg1:boolean):Promise<void>;
 
 export function SetLanguage(arg1:string):Promise<void>;
 
+export function SetServerRule(arg1:string,arg2:string):Promise<void>;
+
 export function SetSkin(arg1:string):Promise<void>;
 
 export function SetTrafficLog(arg1:boolean):Promise<void>;
@@ -67,8 +71,14 @@ export function ShowWindow():Promise<void>;
 
 export function SpeedTest():Promise<void>;
 
+export function TestServers():Promise<void>;
+
 export function TrafficLog(arg1:string):Promise<flows.Report>;
 
 export function Translate(arg1:string):Promise<string>;
 
 export function Unlock():Promise<void>;
+
+export function UpdateSubscription():Promise<void>;
+
+export function UseServer(arg1:string):Promise<void>;

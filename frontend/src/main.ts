@@ -119,11 +119,12 @@ function render() {
     $('statusSub').textContent = !state.service_ok
         ? tr('Служба «AWG Pilot VPN» не запущена — переустановите программу')
         : !active ? tr('Добавьте ключ или .conf на вкладке «Профили и ключи»')
+        : !state.has_config && state.sub ? tf('Профиль «{0}»: в подписке нет серверов — нажмите «Обновить»', active.name)
         : !state.has_config ? tf('Профиль «{0}»: нет конфига — нажмите «Обновить конфиг»', active.name)
         : t.up && !handshakeOk ? tr('Ожидание ответа сервера…')
-        : tf('Профиль «{0}»', active.name) + (t.up && t.endpoint ? ` · ${t.endpoint.replace(/:\d+$/, '')}` : '');
+        : tf('Профиль «{0}»', active.name) + (t.up && t.server_name ? ` · ${t.server_name}` : t.up && t.endpoint ? ` · ${t.endpoint.replace(/:\d+$/, '')}` : '');
 
-    $('stEndpoint').textContent = t.endpoint || state.config_info?.endpoint || '—';
+    $('stEndpoint').textContent = t.server_name || t.endpoint || state.config_info?.endpoint || '—';
     $('stHandshake').textContent = t.up ? ago(t.last_handshake) : '—';
     $('stTraffic').textContent = t.up ? `${bytes(t.rx_bytes)} / ${bytes(t.tx_bytes)}` : '—';
     $('stUptime').textContent = t.up ? duration(t.since) : '00:00:00';
@@ -138,6 +139,7 @@ function render() {
     $('stRouting').title = routing;
     if (state.russia_list) $('russiaInfo').textContent = tf('Российские сайты и сервисы напрямую. Список RIPE NCC: {0}, обновляется раз в неделю', state.russia_list);
     renderProfiles(active);
+    renderSub(state.sub);
     renderUsage(state.usage);
     $('stIPv6').textContent = tr(t.up ? (t.ipv6_blocked ? 'заблокирован' : (t.kill_switch ? 'закрыт' : 'не изменён')) : (s.block_ipv6 ? 'будет закрыт' : 'не изменяется'));
     const nApps = (s.vpn_only_apps ?? []).length;
@@ -198,7 +200,7 @@ function render() {
     ].map(([k, v]) => `<div><span>${esc(k)}</span><b title="${esc(v)}">${esc(v)}</b></div>`).join('') : '';
     if (state.has_key && !a) $('keyInfo').textContent += tr(' · нажмите «Обновить статус»');
 
-    $('foot').textContent = tf('AWG Pilot {0} · движок AmneziaWG 3.1', state.version ?? '') + (state.service_ok ? '' : tr(' · служба не запущена'));
+    $('foot').textContent = tf('AWG Pilot {0} · движки AmneziaWG 3.1 и Xray', state.version ?? '') + (state.service_ok ? '' : tr(' · служба не запущена'));
     $('railVer').textContent = state.version ? `v${state.version}` : '';
     $('logo').title = `AWG Pilot v${state.version ?? ''}`;
     const devText: AnyObj = {saved: 'сохранён', generated: 'создан в AWG Pilot'};
@@ -239,11 +241,12 @@ function renderProfiles(active: AnyObj | undefined) {
     const ic = (name: string) => `<svg><use href="#i-${name}"/></svg>`;
     $('profList').innerHTML = !list.length ? `<li class="empty">${tr('Профилей пока нет — вставьте ключ vpn:// или импортируйте .conf')}</li>`
         : list.map(p => {
-            const what = [p.has_key ? tf('ключ {0}', esc(p.masked_key)) : '', p.has_config ? tf('конфиг: {0}', esc(p.config_for || tr('есть'))) : tr('нет конфига')].filter(Boolean).join(' · ');
+            const what = p.sub ? tr('подписка') + ' · ' + plural(p.servers ?? 0, ['сервер', 'сервера', 'серверов'], ['server', 'servers'])
+                : [p.has_key ? tf('ключ {0}', esc(p.masked_key)) : '', p.has_config ? tf('конфиг: {0}', esc(p.config_for || tr('есть'))) : tr('нет конфига')].filter(Boolean).join(' · ');
             const isActive = active && p.id === active.id;
             const id = esc(p.id);
             return `<li class="${isActive ? 'active' : ''}">
-                <svg class="li-ic"><use href="#i-${p.has_key ? 'key' : 'file'}"/></svg>
+                <svg class="li-ic"><use href="#i-${p.sub ? 'globe' : p.has_key ? 'key' : 'file'}"/></svg>
                 <span class="li-main"><span class="li-name">${esc(p.name)}</span><span class="li-sub" title="${what}">${what}</span></span>
                 <span class="li-act">
                     ${isActive ? `<span class="badge">${tr('активный')}</span>` : `<button class="icon ok" data-act="use" data-id="${id}" data-tip="${tr('Сделать активным')}" aria-label="${tr('Сделать активным')}">${ic('check')}</button>`}
@@ -251,6 +254,108 @@ function renderProfiles(active: AnyObj | undefined) {
                     <button class="icon del" data-act="delete" data-id="${id}" data-tip="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ic('trash')}</button>
                 </span></li>`;
         }).join('');
+}
+
+// ---------- proxy subscription ----------
+const goApp = () => (window as any).go.main.App; // methods added after the generated bindings
+const netIcon: AnyObj = {wifi: 'wifi', mobile: 'cell', wired: 'cable'};
+const netName: AnyObj = {wifi: 'Wi-Fi', mobile: 'Мобильный интернет', wired: 'Кабель'};
+
+function prefers(rule: string, s: AnyObj): boolean {
+    if (rule.startsWith('server:')) return s.id === rule.slice(7);
+    if (rule.startsWith('auto:!')) return s.group !== rule.slice(6);
+    if (rule.startsWith('auto:')) return s.group === rule.slice(5);
+    return true;
+}
+
+function ruleLabel(rule: string, sub: AnyObj): string {
+    if (rule.startsWith('server:')) return (sub.servers ?? []).find((s: AnyObj) => s.id === rule.slice(7))?.name ?? '?';
+    if (rule.startsWith('auto:!')) return tf('Самый быстрый, кроме {0}', rule.slice(6));
+    if (rule.startsWith('auto:')) return tf('Самый быстрый из {0}', rule.slice(5));
+    return tr('Самый быстрый');
+}
+
+const checked = (s: AnyObj) => !!s.at && !String(s.at).startsWith('0001');
+const msText = (s: AnyObj) => !checked(s) ? '—' : s.ms > 0 ? tf('{0} мс', s.ms) : tr('нет ответа');
+const msClass = (s: AnyObj) => !checked(s) ? '' : s.ms <= 0 ? 'bad' : s.ms < 400 ? 'good' : s.ms < 1200 ? 'mid' : 'bad';
+
+function ruleOptions(sub: AnyObj, kind: string): string {
+    const opt = (v: string, label: string) => `<option value="${esc(v)}">${esc(label)}</option>`;
+    let html = opt('', tf('По умолчанию: {0}', ruleLabel(sub.defaults?.[kind] ?? 'auto', sub))) + opt('auto', tr('Самый быстрый'));
+    for (const g of sub.groups ?? []) html += opt(`auto:${g}`, tf('Самый быстрый из {0}', g)) + opt(`auto:!${g}`, tf('Самый быстрый, кроме {0}', g));
+    html += `<optgroup label="${esc(tr('Конкретный сервер'))}">`
+        + (sub.servers ?? []).map((s: AnyObj) => opt(`server:${s.id}`, s.name + (s.ms > 0 ? ` · ${tf('{0} мс', s.ms)}` : ''))).join('') + '</optgroup>';
+    return html;
+}
+
+function fillRuleSelect(sel: HTMLSelectElement, sub: AnyObj, kind: string) {
+    const html = ruleOptions(sub, kind);
+    if (sel.dataset.opts !== html) {
+        sel.innerHTML = html;
+        sel.dataset.opts = html;
+    }
+    if (document.activeElement !== sel) sel.value = sub.custom?.[kind] ?? '';
+}
+
+let subSig = '';
+function renderSub(sub: AnyObj | null | undefined) {
+    const on = !!sub;
+    $('subCard').classList.toggle('hidden', !on);
+    $('subInfoGroup').classList.toggle('hidden', !on);
+    $('subRulesGroup').classList.toggle('hidden', !on);
+    $('keyGroup').classList.toggle('hidden', on);
+    if (!sub) { subSig = ''; return; }
+    const t = state.tunnel ?? {};
+    const kind = sub.net_kind || 'wired';
+    $('subNet').innerHTML = `<svg><use href="#i-${netIcon[kind] ?? 'globe'}"/></svg>${esc(sub.net_kind ? tr(netName[kind]) : tr('Сеть не определена'))}`;
+    fillRuleSelect($<HTMLSelectElement>('selRuleNow'), sub, kind);
+    fillRuleSelect($<HTMLSelectElement>('selRuleWifi'), sub, 'wifi');
+    fillRuleSelect($<HTMLSelectElement>('selRuleMobile'), sub, 'mobile');
+    fillRuleSelect($<HTMLSelectElement>('selRuleWired'), sub, 'wired');
+    $('subTestText').textContent = sub.testing ? tf('Проверка {0}/{1}', sub.tested, sub.test_total) : tr('Проверить');
+    ($('btnSubTest') as HTMLButtonElement).disabled = !!sub.testing;
+    $('btnSubUpdate').classList.toggle('hidden', !sub.has_url);
+    $('subAnnounce').classList.toggle('hidden', !sub.announce);
+    $('subAnnounce').textContent = sub.announce ?? '';
+
+    // profiles tab: what the provider says about the subscription
+    const used = sub.used ?? 0, total = sub.total ?? 0;
+    const pct = total > 0 ? Math.min(100, 100 * used / total) : 0;
+    const rows: [string, string][] = [];
+    if (sub.title) rows.push([tr('Название'), sub.title]);
+    rows.push([tr('Трафик'), total > 0 ? tf('{0} из {1}', bytes(used), bytes(total)) : `${bytes(used)} · ${tr('без лимита')}`]);
+    rows.push([tr('Действует до'), sub.expire > 0 ? new Date(sub.expire * 1000).toLocaleDateString(locale()) : tr('бессрочно')]);
+    rows.push([tr('Серверов'), String((sub.servers ?? []).length) + ((sub.groups ?? []).length ? ` (${sub.groups.join(', ')})` : '')]);
+    if (sub.has_url) rows.push([tr('Обновлена'), ago(sub.updated) + (sub.update_hours ? ' · ' + tf('раз в {0} ч', sub.update_hours) : '')]);
+    if (sub.host) rows.push([tr('Источник'), sub.host]);
+    const kv = rows.map(([k, v]) => `<div><span>${esc(k)}</span><b title="${esc(v)}">${esc(v)}</b></div>`).join('')
+        + (total > 0 ? `<div class="wide"><div class="traffic ${pct > 90 ? 'warn' : ''}" style="flex:1"><i style="width:${pct.toFixed(1)}%"></i></div></div>` : '');
+    if ($('subInfo').innerHTML !== kv) $('subInfo').innerHTML = kv;
+    const links = [sub.support_url ? `<button class="ghost sm" data-open="support">${tr('Поддержка')}</button>` : '',
+        sub.web_page ? `<button class="ghost sm" data-open="web">${tr('Страница подписки')}</button>` : ''].join('');
+    if ($('subLinks').innerHTML !== links) $('subLinks').innerHTML = links;
+
+    // server list: grouped, the one in use marked, the ones the rule passes over dimmed
+    const rule = sub.rules?.[kind] ?? 'auto';
+    const sig = JSON.stringify([sub.servers, sub.current, rule, t.up, t.server_name, lang]);
+    if (sig === subSig) return;
+    subSig = sig;
+    const groups: string[] = [...(sub.groups ?? []), ''];
+    const list: AnyObj[] = sub.servers ?? [];
+    let html = '';
+    for (const g of groups) {
+        const part = list.filter(s => (s.group || '') === g);
+        if (!part.length) continue;
+        if (groups.length > 1) html += `<li class="srvgroup">${esc(g || tr('Прочие'))}</li>`;
+        html += part.map(s => {
+            const cur = s.id === sub.current && t.up;
+            const title = `${s.proto.toUpperCase()} · ${s.host}:${s.port}` + (s.err ? ` · ${s.err}` : '');
+            return `<li class="${cur ? 'cur' : ''} ${prefers(rule, s) ? '' : 'dim'}" data-srv="${esc(s.id)}" title="${esc(title)}">`
+                + `<span class="li-main"><span class="li-name">${esc(s.name)}</span><span class="li-sub">${esc(s.proto.toUpperCase())} · ${esc(s.host)}${cur ? ' · ' + tr('используется') : ''}</span></span>`
+                + `<span class="ms ${msClass(s)}">${esc(msText(s))}</span></li>`;
+        }).join('');
+    }
+    $('srvList').innerHTML = html || `<li class="empty">${tr('Серверов нет')}</li>`;
 }
 
 function renderUsage(u: AnyObj | undefined) {
@@ -591,10 +696,14 @@ $('chkWidget').addEventListener('change', () => {
     run('Окошко статуса', () => Go.SetWidget(on));
 });
 
-$('btnSaveKey').onclick = () => run('Ключ', async () => {
-    await Go.AddKey($<HTMLInputElement>('inpKey').value);
-    $<HTMLInputElement>('inpKey').value = '';
-}, 'Ключ добавлен как профиль');
+$('btnSaveKey').onclick = () => {
+    const v = $<HTMLInputElement>('inpKey').value.trim();
+    const sub = /^(https?|vless|trojan|ss|vmess):[/][/]/i.test(v);
+    run(sub ? 'Подписка' : 'Ключ', async () => {
+        await Go.AddKey(v);
+        $<HTMLInputElement>('inpKey').value = '';
+    }, sub ? 'Подписка добавлена — проверяю серверы' : 'Ключ добавлен как профиль');
+};
 $('btnDevNew').onclick = async () => {
     if (!await confirmed('Создать новый ID устройства?', 'Провайдер может засчитать его как ещё одно устройство (занять место из лимита).', 'Создать', true)) return;
     run('ID устройства', () => Go.NewDeviceID(), 'Создан новый ID устройства');
@@ -645,6 +754,28 @@ $('profList').addEventListener('click', async ev => {
     }
 });
 $('btnRefresh').onclick = () => run('Статус подписки', () => Go.RefreshAccount());
+$('btnSubTest').onclick = () => run('Проверка серверов', () => goApp().TestServers());
+$('btnSubUpdate').onclick = () => run('Обновление подписки', () => goApp().UpdateSubscription(), 'Подписка обновлена');
+$('srvList').addEventListener('click', ev => {
+    const li = (ev.target as HTMLElement).closest<HTMLElement>('li[data-srv]');
+    if (!li || busy) return;
+    const s = (state.sub?.servers ?? []).find((x: AnyObj) => x.id === li.dataset.srv);
+    if (!s) return;
+    run('Выбор сервера', () => goApp().UseServer(s.id), tf('Сервер «{0}» выбран для этой сети', s.name));
+});
+$('selRuleNow').addEventListener('change', () => {
+    const kind = state.sub?.net_kind || 'wired';
+    run('Выбор сервера', () => goApp().SetServerRule(kind, $<HTMLSelectElement>('selRuleNow').value));
+});
+['selRuleWifi', 'selRuleMobile', 'selRuleWired'].forEach(id => $(id).addEventListener('change', () => {
+    const sel = $<HTMLSelectElement>(id);
+    run('Выбор сервера', () => goApp().SetServerRule(sel.dataset.kind, sel.value), 'Сохранено');
+}));
+$('subLinks').addEventListener('click', ev => {
+    const b = (ev.target as HTMLElement).closest<HTMLElement>('button[data-open]');
+    if (b) goApp().OpenSubLink(b.dataset.open).catch(async (e: any) => banner(await errText(e)));
+});
+
 $('btnImportFile').onclick = () => run('Импорт', () => Go.ImportConfigFile());
 $('btnExport').onclick = () => run('Экспорт', () => Go.ExportConfigFile());
 $('btnRebind').onclick = async () => {
