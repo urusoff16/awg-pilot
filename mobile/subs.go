@@ -168,6 +168,11 @@ func (a *App) TestServers() error {
 // testServers measures the servers of profile id (only those in only, if given). The app is
 // outside its own VPN, so the checks go straight over the phone's network even while connected.
 func (a *App) testServers(id string, only []subscription.Server) {
+	a.testServersCtx(context.Background(), id, only)
+}
+
+// testServersCtx is testServers that stops when ctx ends; unfinished servers keep their old checks.
+func (a *App) testServersCtx(parent context.Context, id string, only []subscription.Server) {
 	if !a.sub.testing.CompareAndSwap(false, true) {
 		return
 	}
@@ -196,9 +201,12 @@ func (a *App) testServers(id string, only []subscription.Server) {
 	}
 	var ok atomic.Int32
 	// A bound on the whole check: a server that hangs must not keep "checking" on screen forever.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	defer cancel()
 	xray.TestAll(ctx, links, 8, 6*time.Second, func(i int, r xray.Result) {
+		if r.Ms <= 0 && ctx.Err() != nil {
+			return // cut short, not a failure of the server
+		}
 		if r.Ms > 0 {
 			ok.Add(1)
 		}
@@ -267,9 +275,7 @@ func (a *App) UseServer(id string) error {
 	if err := a.SetServerRule(a.currentKind(), "server:"+id); err != nil {
 		return err
 	}
-	a.tunOp.Lock()
-	up := a.tun != nil
-	a.tunOp.Unlock()
+	up := a.curTun() != nil
 	if !up {
 		return a.Connect()
 	}
@@ -331,7 +337,10 @@ func (a *App) connectSubLocked(id string) error {
 	a.mu.Unlock()
 	if need && len(preferred) > 0 && !a.sub.testing.Load() {
 		a.logf("проверяю серверы для сети «%s»…", subui.NetName(kind))
-		a.testServers(id, preferred)
+		a.connectTest(id, preferred)
+	}
+	if a.connectCancelled() {
+		return errAborted
 	}
 
 	dns := dnsServers(s)
@@ -347,12 +356,19 @@ func (a *App) connectSubLocked(id string) error {
 	for _, d := range dns {
 		plan.DNS = append(plan.DNS, d.String())
 	}
-	if err := a.addRoutes(&plan, s, dns, false, nil); err != nil {
+	rs := s
+	if s.Split.RussiaByDomain() {
+		rs.Split.BypassRussia = false // Xray sends Russian sites straight out by domain: no routes needed
+	}
+	if err := a.addRoutes(&plan, rs, dns, false, nil); err != nil {
 		return err
 	}
 	dropV6 := s.BlockIPv6
 
 	for attempt := 0; attempt < 5; attempt++ {
+		if a.connectCancelled() {
+			return errAborted
+		}
 		a.mu.Lock()
 		p = a.secrets.Find(id)
 		if p == nil || p.Sub == nil {
@@ -389,15 +405,15 @@ func (a *App) connectSubLocked(id string) error {
 		}
 		if a.tun != nil {
 			a.tun.Close()
-			a.tun = nil
+			a.setTun(nil)
 		}
-		t, err := startProxy(fd, link, srv.ID, addr, plan.MTU, dropV6, a.flows)
+		t, err := startProxy(fd, link, srv.ID, addr, plan.MTU, dropV6, a.flows, s.DirectDomains())
 		if err != nil {
 			a.plat.Release()
 			a.logf("подключение через «%s» не удалось: %v", srv.Name, err)
 			return err
 		}
-		a.tun = t
+		a.setTun(t)
 		a.meter.Reset()
 		a.mu.Lock()
 		if p := a.secrets.Find(id); p != nil && p.Sub != nil {
@@ -434,9 +450,7 @@ func (a *App) SetNetKind(kind string) {
 		a.sub.mu.Unlock()
 		return // moved to the profile for this network
 	}
-	a.tunOp.Lock()
-	t, _ := a.tun.(*proxyTunnel)
-	a.tunOp.Unlock()
+	t, _ := a.curTun().(*proxyTunnel)
 	if t == nil {
 		return
 	}
@@ -641,4 +655,46 @@ func (a *App) SubLink(which string) (string, error) {
 		}
 	}
 	return "", errors.New("у подписки нет такой ссылки")
+}
+
+// errAborted ends a connect the user cancelled with "Disconnect".
+var errAborted = errors.New("подключение отменено")
+
+// connectTest checks servers before a connect: at most 15 seconds, and it stops at once when the
+// user cancels the connect, so "Disconnect" never waits for a whole check.
+func (a *App) connectTest(id string, list []subscription.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	go func() {
+		t := time.NewTicker(150 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if a.connectCancelled() {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	a.testServersCtx(ctx, id, list)
+}
+
+func (a *App) connectCancelled() bool { return a.abort.Load() }
+
+type tunBox struct{ t vpnTunnel }
+
+// setTun replaces the running tunnel; callers hold tunOp.
+func (a *App) setTun(t vpnTunnel) {
+	a.tun = t
+	a.tunBox.Store(tunBox{t})
+}
+
+// curTun is the running tunnel without waiting for tunOp (nil when down).
+func (a *App) curTun() vpnTunnel {
+	b, _ := a.tunBox.Load().(tunBox)
+	return b.t
 }

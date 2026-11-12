@@ -167,10 +167,6 @@ func (a *App) pingLink(link string) xray.Result {
 	return xray.Test(context.Background(), link, 6*time.Second)
 }
 
-func (a *App) tunnelUp() bool {
-	a.tunOp.Lock()
-	defer a.tunOp.Unlock()
-	return a.tun != nil
-}
+func (a *App) tunnelUp() bool { return a.curTun() != nil }
 
 func (a *App) selectProfileFor(id string) error { return a.SelectProfile(id) }

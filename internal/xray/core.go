@@ -25,6 +25,7 @@ import (
 	_ "github.com/xtls/xray-core/app/policy"
 	_ "github.com/xtls/xray-core/app/proxyman/inbound"
 	_ "github.com/xtls/xray-core/app/proxyman/outbound"
+	_ "github.com/xtls/xray-core/app/router"
 	_ "github.com/xtls/xray-core/proxy/blackhole"
 	_ "github.com/xtls/xray-core/proxy/freedom"
 	_ "github.com/xtls/xray-core/proxy/shadowsocks"
@@ -51,13 +52,25 @@ type Instance struct {
 
 // Start runs Xray for the server of link. address, when not empty, is the server's IP resolved in
 // advance: the system resolver may be the one that goes through the tunnel.
-func Start(link *Link, address string) (*Instance, error) {
+func Start(link *Link, address string, direct ...string) (*Instance, error) {
 	cfg := map[string]any{
 		"log":       map[string]any{"loglevel": "none", "access": "none", "error": "none"},
 		"outbounds": []any{link.Outbound("proxy", address)},
 		"policy": map[string]any{"levels": map[string]any{"0": map[string]any{
 			"handshake": 8, "connIdle": 300, "uplinkOnly": 1, "downlinkOnly": 1,
 		}}},
+	}
+	// direct: domains (and their subdomains) that go straight out, not through the server — the
+	// "Russia past the VPN" list. The engine sniffs the site name from TLS, HTTP and QUIC for it.
+	if len(direct) > 0 {
+		doms := make([]string, len(direct))
+		for i, d := range direct {
+			doms[i] = "domain:" + d
+		}
+		cfg["outbounds"] = []any{link.Outbound("proxy", address), map[string]any{"tag": "direct", "protocol": "freedom"}}
+		cfg["routing"] = map[string]any{"domainStrategy": "AsIs", "rules": []any{
+			map[string]any{"type": "field", "domain": doms, "outboundTag": "direct"},
+		}}
 	}
 	b, err := json.Marshal(cfg)
 	if err != nil {

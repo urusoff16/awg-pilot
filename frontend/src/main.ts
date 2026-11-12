@@ -137,7 +137,7 @@ function render() {
         + (s.split?.bypass_lan ? ', LAN' : '');
     $('stRouting').textContent = routing;
     $('stRouting').title = routing;
-    if (state.russia_list) $('russiaInfo').textContent = tf('Российские сайты и сервисы напрямую. Список RIPE NCC: {0}, обновляется раз в неделю', state.russia_list);
+    if (state.russia_list && s.split?.russia_mode === 'ip') $('russiaInfo').textContent = tf('Российские сайты и сервисы напрямую. Список RIPE NCC: {0}, обновляется раз в неделю', state.russia_list);
     renderProfiles(active);
     renderSub(state.sub);
     renderUsage(state.usage);
@@ -663,6 +663,17 @@ function renderPkgs() {
         : 'Выбранные приложения идут напрямую, все остальные — через VPN.');
 }
 
+// renderRussiaOpts shows how "Russia past the VPN" finds Russian traffic.
+function renderRussiaOpts() {
+    const on = $<HTMLInputElement>('chkRussia').checked;
+    const ip = $<HTMLSelectElement>('selRussiaMode').value === 'ip';
+    $('russiaOpts').classList.toggle('hidden', !on);
+    $('txtRuDomains').classList.toggle('hidden', ip);
+    $('russiaModeHint').textContent = ip
+        ? tr('Все российские сети из реестра RIPE NCC: точно, но на ПК это около 20 тысяч маршрутов, и подключение нагружает систему.')
+        : tr('Напрямую идут сайты в зонах .ru, .рф, .su и российские сервисы из встроенного списка (VK, Яндекс, маркетплейсы, банки), а также ваши домены. Маршруты появляются только для открытых сайтов. «Безопасный DNS» в браузере со своим сервером обход не видит. На Android с профилем AmneziaWG работает по списку сетей.');
+}
+
 function fillSettings(s: AnyObj) {
     apps = [...(s.vpn_only_apps ?? [])];
     renderApps();
@@ -690,6 +701,9 @@ function fillSettings(s: AnyObj) {
     document.querySelectorAll<HTMLInputElement>('input[name=mode]').forEach(r => r.checked = r.value === mode);
     $<HTMLInputElement>('chkLan').checked = !!s.split?.bypass_lan;
     $<HTMLInputElement>('chkRussia').checked = !!s.split?.bypass_russia;
+    $<HTMLSelectElement>('selRussiaMode').value = s.split?.russia_mode === 'ip' ? 'ip' : 'domains';
+    $<HTMLTextAreaElement>('txtRuDomains').value = (s.split?.russia_domains ?? []).join('\n');
+    renderRussiaOpts();
     $<HTMLTextAreaElement>('txtEntries').value = (s.split?.entries ?? []).join('\n');
 }
 
@@ -724,6 +738,8 @@ function collectSettings(): AnyObj {
         mode,
         bypass_lan: $<HTMLInputElement>('chkLan').checked,
         bypass_russia: $<HTMLInputElement>('chkRussia').checked,
+        russia_mode: $<HTMLSelectElement>('selRussiaMode').value === 'ip' ? 'ip' : '',
+        russia_domains: $<HTMLTextAreaElement>('txtRuDomains').value.split('\n').map(x => x.trim()).filter(Boolean),
         entries: $<HTMLTextAreaElement>('txtEntries').value.split('\n').map(x => x.trim()).filter(Boolean),
     };
     return s;
@@ -764,12 +780,13 @@ document.querySelectorAll<HTMLButtonElement>('.tab[data-tab]').forEach(btn => bt
     refresh();
 }));
 
-['chkKill', 'chkIPv6', 'chkTray', 'chkReconnect', 'chkAuto', 'chkAutoChange', 'chkLockdown', 'chkNotify', 'chkSubscription', 'selDNS', 'inpDNS', 'inpMTU', 'selCheckEvery', 'inpWeakPing', 'chkLan', 'chkRussia', 'txtEntries'].forEach(id =>
+['chkKill', 'chkIPv6', 'chkTray', 'chkReconnect', 'chkAuto', 'chkAutoChange', 'chkLockdown', 'chkNotify', 'chkSubscription', 'selDNS', 'inpDNS', 'inpMTU', 'selCheckEvery', 'inpWeakPing', 'chkLan', 'chkRussia', 'selRussiaMode', 'txtRuDomains', 'txtEntries'].forEach(id =>
     $(id).addEventListener('input', () => {
         settingsDirty = true;
         $<HTMLInputElement>('inpDNS').disabled = $<HTMLSelectElement>('selDNS').value !== 'custom';
     }));
 document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', () => settingsDirty = true));
+['chkRussia', 'selRussiaMode'].forEach(id => $(id).addEventListener('change', renderRussiaOpts));
 document.querySelectorAll('input[name=appmode]').forEach(r => r.addEventListener('change', () => {
     settingsDirty = true;
     renderPkgs();
@@ -805,13 +822,26 @@ $('chkAutostart').addEventListener('change', () => {
     run('Автозапуск', () => Go.SetAutostart(on), on ? 'AWG Pilot будет запускаться вместе с Windows' : 'Автозапуск выключен');
 });
 
+let cancelled = false;
 $('btnPower').onclick = () => {
+    // A press while connecting cancels: the core stops the connect at its next step.
+    if (document.body.classList.contains('connecting')) {
+        cancelled = true;
+        document.body.classList.remove('connecting');
+        $('statusTitle').textContent = tr('Отключение…');
+        Go.Disconnect().finally(refresh);
+        return;
+    }
     if (busy) return;
     const connecting = !state.tunnel?.up;
+    cancelled = false;
     document.body.classList.toggle('connecting', connecting);
+    $('statusTitle').textContent = tr(connecting ? 'Подключение…' : 'Отключение…');
     run('Подключение', async () => {
         try {
             if (connecting) await Go.Connect(); else await Go.Disconnect();
+        } catch (e: any) {
+            if (!cancelled) throw e; // a cancelled connect is not an error to show
         } finally {
             document.body.classList.remove('connecting');
         }

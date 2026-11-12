@@ -444,6 +444,7 @@ var table = map[string]string{
 	"Сеть «%s» — профиль «%s»":                               "Network \"%s\": profile \"%s\"",
 	"VPN: запасной профиль":                                  "VPN: fallback profile",
 	"у профиля нет серверов подписки":                        "the profile has no subscription servers",
+	"подключение отменено":                                   "connect cancelled",
 	"служба не ответила":                                     "the service did not answer",
 	"VPN: основной профиль":                                  "VPN: main profile",
 }

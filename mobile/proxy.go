@@ -46,17 +46,17 @@ type proxyTunnel struct {
 const proxyProbeEvery = 5 * time.Second
 
 // startProxy takes ownership of fd (closed on failure).
-func startProxy(fd int, link *xray.Link, serverID, addr string, mtu int, dropV6 bool, tap packetTap) (*proxyTunnel, error) {
+func startProxy(fd int, link *xray.Link, serverID, addr string, mtu int, dropV6 bool, tap packetTap, direct []string) (*proxyTunnel, error) {
 	td, err := tunFromFD(fd)
 	if err != nil {
 		return nil, err
 	}
-	inst, err := xray.Start(link, addr)
+	inst, err := xray.Start(link, addr, direct...)
 	if err != nil {
 		td.Close()
 		return nil, err
 	}
-	opt := xray.EngineOptions{MTU: mtu, DropIPv6: dropV6}
+	opt := xray.EngineOptions{MTU: mtu, DropIPv6: dropV6, Sniff: len(direct) > 0}
 	if tap != nil {
 		opt.Tap = tap.Packet
 	}

@@ -54,7 +54,9 @@ type Options struct {
 	// server's address resolved in advance ("" = let Xray resolve the name).
 	Proxy     string
 	ProxyAddr string
-	Logf      func(format string, args ...any)
+	// Direct are domains that bypass the VPN ("Russia past the VPN" by domain).
+	Direct []string
+	Logf   func(format string, args ...any)
 }
 
 // ULA address given to the adapter so Windows will use the IPv6 blackhole route.
@@ -90,6 +92,12 @@ type PacketTap interface {
 }
 
 type Manager struct {
+	// lastStats is what Stats returns while Up or Down holds mu (bringing up thousands of routes
+	// takes a while, and the window polls the state every second).
+	lastStats atomic.Pointer[Stats]
+	// dnsProxy runs "Russia past the VPN" by domain for an AmneziaWG tunnel.
+	dnsProxy *dnsProxy
+
 	// Tap, when set before Up, gets the tunnel's packets (the traffic log).
 	Tap PacketTap
 
@@ -214,6 +222,29 @@ func (m *Manager) Up(o Options) (err error) {
 	if o.MTU > 0 {
 		cfg.Interface.MTU = uint16(o.MTU)
 	}
+	// "Russia past the VPN" by domain: the system's DNS server becomes this tunnel's own address,
+	// where dnsProxy answers; the DNS servers it had are asked through the tunnel as before.
+	var dnsListen netip.Addr
+	var dnsUpstream []netip.Addr
+	if len(o.Direct) > 0 && len(cfg.Interface.Addresses) > 0 {
+		for _, ad := range cfg.Interface.Addresses {
+			if a, ok := netip.AddrFromSlice(ad.IP.To4()); ok && ad.IP.To4() != nil {
+				dnsListen = a
+				break
+			}
+		}
+		for _, d := range cfg.Interface.DNS {
+			if a, ok := netip.AddrFromSlice(d.To4()); ok && d.To4() != nil {
+				dnsUpstream = append(dnsUpstream, a)
+			}
+		}
+		if len(dnsUpstream) == 0 {
+			dnsUpstream = []netip.Addr{netip.MustParseAddr("1.1.1.1")}
+		}
+		if dnsListen.IsValid() {
+			cfg.Interface.DNS = []net.IP{net.IP(dnsListen.AsSlice())}
+		}
+	}
 	blockV6 := o.BlockIPv6 && !hasV6Addr
 
 	defer func() {
@@ -288,6 +319,20 @@ func (m *Manager) Up(o Options) (err error) {
 			return fmt.Errorf("не удалось настроить сетевой адаптер: %w", err)
 		}
 	}
+	if dnsListen.IsValid() {
+		p, perr := startDNSProxy(dnsListen, dnsUpstream, o.Direct, winipcfg.LUID(m.nativeTun.LUID()), logf)
+		if perr != nil {
+			logf("Россия мимо VPN по доменам не включилась (%v): всё идёт через VPN", perr)
+			var up []net.IP
+			for _, a := range dnsUpstream {
+				up = append(up, net.IP(a.AsSlice()))
+			}
+			winipcfg.LUID(m.nativeTun.LUID()).SetDNS(windows.AF_INET, up, nil)
+		} else {
+			m.dnsProxy = p
+			logf("Россия мимо VPN по доменам: %d доменов и зон, маршруты добавляются по мере открытия сайтов", len(o.Direct))
+		}
+	}
 	m.since = time.Now()
 	m.v6Blocked = blockV6
 	logf("туннель поднят: сервер %s, маршрутов %d, kill switch: %s, IPv6: %s", cfg.Peers[0].Endpoint.String(), len(cfg.Peers[0].AllowedIPs), onOff(m.firewall), map[bool]string{true: "заблокирован", false: "без изменений"}[blockV6])
@@ -357,6 +402,10 @@ func (m *Manager) teardownLocked() {
 		cb.Unregister()
 	}
 	m.callbacks = nil
+	if m.dnsProxy != nil {
+		m.dnsProxy.Close()
+		m.dnsProxy = nil
+	}
 	if m.firewall {
 		wfp.DisableFirewall()
 		m.firewall = false
@@ -392,8 +441,20 @@ func (m *Manager) IsUp() bool {
 
 // Stats reads counters from the device's UAPI (or the proxy engine).
 func (m *Manager) Stats() Stats {
-	m.mu.Lock()
+	if !m.mu.TryLock() {
+		if p := m.lastStats.Load(); p != nil {
+			return *p
+		}
+		return Stats{}
+	}
 	defer m.mu.Unlock()
+	st := m.stats()
+	m.lastStats.Store(&st)
+	return st
+}
+
+// stats reads the state; callers hold mu.
+func (m *Manager) stats() Stats {
 	st := Stats{Up: m.up(), Since: m.since, KillSwitch: m.firewall, IPv6Blocked: m.v6Blocked,
 		NetChanges: m.netChanges.Load(), NoNetwork: m.up() && m.noNet.Load()}
 	if k, ok := m.netKind.Load().(string); ok && m.up() {
@@ -607,7 +668,7 @@ func configureInterface(family winipcfg.AddressFamily, cfg *conf.Config, nt *tun
 		}
 		dedup = append(dedup, &routes[i])
 	}
-	if err := luid.SetRoutesForFamily(family, dedup); err != nil {
+	if err := setRoutesPaced(luid, family, dedup); err != nil {
 		return err
 	}
 	ipif, err := luid.IPInterface(family)
@@ -663,4 +724,31 @@ func cleanupAddressesOnDisconnectedInterfaces(family winipcfg.AddressFamily, add
 			}
 		}
 	}
+}
+
+// routeBatch routes are added between short pauses. Windows tells every program that watches the
+// network about each new route; thousands at once (the Russian networks list) load the whole
+// system for seconds, down to a jerky mouse pointer. Paced, they take a little longer but the
+// system stays smooth.
+const routeBatch, routePause = 200, 12 * time.Millisecond
+
+// setRoutesPaced is winipcfg's SetRoutesForFamily with pauses between batches.
+func setRoutesPaced(luid winipcfg.LUID, family winipcfg.AddressFamily, routes []*winipcfg.RouteData) error {
+	if err := luid.FlushRoutes(family); err != nil {
+		return err
+	}
+	n := 0
+	for _, rd := range routes {
+		v4 := rd.Destination.IP.To4() != nil
+		if v4 != (family == windows.AF_INET) {
+			continue
+		}
+		if err := luid.AddRoute(rd.Destination, rd.NextHop, rd.Metric); err != nil {
+			return err
+		}
+		if n++; n%routeBatch == 0 {
+			time.Sleep(routePause)
+		}
+	}
+	return nil
 }

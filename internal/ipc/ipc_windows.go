@@ -46,6 +46,8 @@ type UpParams struct {
 	// Proxy is a subscription server's share link: the tunnel goes through it with Xray.
 	Proxy     string `json:"proxy,omitempty"`
 	ProxyAddr string `json:"proxy_addr,omitempty"`
+	// Direct are domains that bypass the VPN ("Russia past the VPN" by domain).
+	Direct []string `json:"direct,omitempty"`
 }
 
 type Request struct {

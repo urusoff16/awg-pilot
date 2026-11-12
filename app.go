@@ -81,6 +81,9 @@ type App struct {
 	speed        speedtest.Tracker
 	sub          subState              // proxy subscriptions: server checks and recovery
 	auto         *autopilot.Controller // profile by network, fallback and background checks
+	// lastStats is the tunnel state the monitor read last: the UI shows it instead of asking the
+	// service, which is busy (and would make the window wait) while it brings a tunnel up.
+	lastStats atomic.Pointer[tunnel.Stats]
 }
 
 // activateLocked derives per-profile state (decoded key, account data) from the active
@@ -407,6 +410,7 @@ func (a *App) GetState() State {
 	if a.auto != nil {
 		checks, checking = a.auto.Checks(), a.auto.Checking()
 	}
+	st, svcOK := a.cachedStats(), a.tun.Available()
 	a.sub.mu.Lock()
 	testStarted, testingID := a.sub.lastCheck, a.sub.testingID
 	a.sub.mu.Unlock()
@@ -422,9 +426,9 @@ func (a *App) GetState() State {
 		DeviceSource: a.deviceSrc,
 		Account:      a.account,
 		Countries:    a.countries,
-		Tunnel:       a.tun.Stats(),
+		Tunnel:       st,
 		Warnings:     a.warnings,
-		ServiceOK:    a.tun.Available(),
+		ServiceOK:    svcOK,
 		Autostart:    autostartOn,
 		Version:      appVersion,
 		RussiaList:   a.russiaStatus,
@@ -1209,7 +1213,23 @@ func (a *App) Connect() error {
 	a.wanted.Store(true)
 	a.tunOp.Lock()
 	defer a.tunOp.Unlock()
-	return a.connectLocked()
+	err := a.connectLocked()
+	a.freshStats()
+	return err
+}
+
+// cachedStats is the monitor's last reading (it never waits for the service).
+func (a *App) cachedStats() tunnel.Stats {
+	if p := a.lastStats.Load(); p != nil {
+		return *p
+	}
+	return tunnel.Stats{PingMs: -1}
+}
+
+// freshStats reads the state right after a connect or disconnect, so the window shows it at once.
+func (a *App) freshStats() {
+	st := a.tun.Stats()
+	a.lastStats.Store(&st)
 }
 
 func (a *App) connectLocked() error {
@@ -1256,6 +1276,7 @@ func (a *App) connectLocked() error {
 		DNS:        dns,
 		MTU:        settings.MTU,
 		Lockdown:   settings.LockdownOnDrop,
+		Direct:     settings.DirectDomains(),
 		Logf:       a.logf,
 	})
 	if err != nil {
@@ -1269,10 +1290,11 @@ func (a *App) connectLocked() error {
 
 // Disconnect is the user's deliberate disconnect: it also reopens a blocked internet.
 func (a *App) Disconnect() {
-	a.wanted.Store(false)
+	a.wanted.Store(false) // a connect in progress gives up at its next step
 	a.tunOp.Lock()
 	defer a.tunOp.Unlock()
 	a.disconnectLocked(true)
+	a.freshStats()
 }
 
 // disconnectLocked stops the tunnel. release=false (reconnects, failover) keeps an armed

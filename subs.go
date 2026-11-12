@@ -179,6 +179,11 @@ func (a *App) TestServers() error {
 // testServers measures the servers of profile id (only those in only, if given) through the
 // service and stores the results. It returns when all are done.
 func (a *App) testServers(id string, only []subscription.Server) {
+	a.testServersCtx(context.Background(), id, only)
+}
+
+// testServersCtx is testServers that stops between parts when ctx ends.
+func (a *App) testServersCtx(ctx context.Context, id string, only []subscription.Server) {
 	if !a.sub.testing.CompareAndSwap(false, true) {
 		return
 	}
@@ -203,6 +208,9 @@ func (a *App) testServers(id string, only []subscription.Server) {
 	a.sub.mu.Unlock()
 	ok := 0
 	for start := 0; start < len(list); start += subTestChunk {
+		if ctx.Err() != nil {
+			break
+		}
 		chunk := list[start:min(start+subTestChunk, len(list))]
 		links := make([]string, len(chunk))
 		for i, s := range chunk {
@@ -330,7 +338,10 @@ func (a *App) connectSubLocked(id string, settings store.Settings) error {
 	// Only with the tunnel down, so that the checks go straight over the network.
 	if need && !a.tun.IsUp() && len(preferred) > 0 && !a.sub.testing.Load() {
 		a.logf("проверяю серверы для сети «%s»…", subui.NetName(kind))
-		a.testServers(id, preferred)
+		a.connectTest(id, preferred)
+	}
+	if a.connectCancelled() {
+		return errAborted
 	}
 
 	dns := dnsServers(settings)
@@ -345,6 +356,9 @@ func (a *App) connectSubLocked(id string, settings store.Settings) error {
 	}
 	// A server whose name does not resolve is skipped for the next one.
 	for attempt := 0; attempt < 5; attempt++ {
+		if a.connectCancelled() {
+			return errAborted
+		}
 		a.mu.Lock()
 		p = a.profileByID(id)
 		if p == nil || p.Sub == nil {
@@ -367,7 +381,7 @@ func (a *App) connectSubLocked(id string, settings store.Settings) error {
 		}
 		a.logf("подключаюсь: профиль «%s», сеть «%s», выбор «%s», сервер «%s» (%s:%d)", profName, subui.NetName(kind), subui.RuleName(rule, servers), srv.Name, srv.Host, srv.Port)
 		err = a.tun.Up(tunnel.Options{
-			Proxy: srv.Link, ProxyAddr: addr,
+			Proxy: srv.Link, ProxyAddr: addr, Direct: settings.DirectDomains(),
 			AllowedIPs: plan.AllowedIPs, FullTunnel: plan.FullTunnel,
 			KillSwitch: settings.KillSwitch, BlockIPv6: settings.BlockIPv6,
 			DNS: dns, MTU: settings.MTU, Lockdown: settings.LockdownOnDrop,
@@ -416,7 +430,7 @@ func (a *App) markFailed(id string) {
 // routePlan works out what goes through the tunnel (split tunnel, Russia, LAN).
 func (a *App) routePlan(settings store.Settings, tunnelDNS []netip.Addr) (routing.Result, error) {
 	var bypass []netip.Prefix
-	if settings.Split.BypassRussia && settings.Split.Mode != routing.ModeInclude {
+	if settings.Split.RussiaByIP() {
 		ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
 		list, err := geoip.Get(ctx, filepath.Join(a.st.Dir(), "ru-ipv4.txt"))
 		cancel()
@@ -676,3 +690,32 @@ func (a *App) OpenSubLink(which string) error {
 	wruntime.BrowserOpenURL(a.ctx, link)
 	return nil
 }
+
+// errAborted ends a connect the user cancelled with "Disconnect".
+var errAborted = errors.New("подключение отменено")
+
+// connectTest checks servers before a connect: at most 15 seconds, and it stops at once when the
+// user cancels the connect, so "Disconnect" never waits for a whole check.
+func (a *App) connectTest(id string, list []subscription.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	go func() {
+		t := time.NewTicker(150 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if a.connectCancelled() {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	a.testServersCtx(ctx, id, list)
+}
+
+// connectCancelled: the user pressed "Disconnect" (the VPN is no longer wanted).
+func (a *App) connectCancelled() bool { return !a.wanted.Load() }

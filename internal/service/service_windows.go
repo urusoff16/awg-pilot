@@ -161,7 +161,7 @@ func (b *backend) Up(p ipc.UpParams) error {
 	err := b.tun.Up(tunnel.Options{
 		RawConfig: p.RawConfig, AllowedIPs: p.AllowedIPs, FullTunnel: p.FullTunnel,
 		KillSwitch: p.KillSwitch, BlockIPv6: p.BlockIPv6, DNS: p.DNS, MTU: p.MTU,
-		Proxy: p.Proxy, ProxyAddr: p.ProxyAddr,
+		Proxy: p.Proxy, ProxyAddr: p.ProxyAddr, Direct: p.Direct,
 		Logf: b.logf,
 	})
 	if err != nil {

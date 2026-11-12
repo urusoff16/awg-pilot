@@ -106,6 +106,10 @@ type App struct {
 
 	tunOp sync.Mutex // serializes connect/disconnect
 	tun   vpnTunnel
+	// tunBox mirrors tun for readers that must not wait for a connect (the UI's state polls).
+	tunBox atomic.Value
+	// abort is set by Disconnect: a connect in progress stops at its next step.
+	abort atomic.Bool
 	kind  atomic.Value // string: the phone's network ("wifi", "mobile", "wired"), from Android
 	sub   subState
 	logs  logRing
@@ -325,9 +329,7 @@ type ConfigInfo struct {
 }
 
 func (a *App) stats() Stats {
-	a.tunOp.Lock()
-	t := a.tun
-	a.tunOp.Unlock()
+	t := a.curTun()
 	if t == nil {
 		return Stats{PingMs: -1}
 	}
@@ -496,9 +498,7 @@ func (a *App) SetSystemLanguage(tag string) string {
 
 // SpeedTest measures download and upload through the tunnel (Cloudflare speed test servers).
 func (a *App) SpeedTest() error {
-	a.tunOp.Lock()
-	t := a.tun
-	a.tunOp.Unlock()
+	t := a.curTun()
 	if t == nil {
 		return errors.New("сначала подключите VPN")
 	}
@@ -1109,6 +1109,7 @@ func resolveEndpoint(ep string) (string, error) {
 }
 
 func (a *App) Connect() error {
+	a.abort.Store(false)
 	a.tunOp.Lock()
 	defer a.tunOp.Unlock()
 	return a.connectLocked()
@@ -1154,7 +1155,7 @@ func (a *App) connectLocked() error {
 	}
 	if a.tun != nil {
 		a.tun.Close()
-		a.tun = nil
+		a.setTun(nil)
 	}
 	var pingTo netip.Addr
 	if len(plan.DNS) > 0 {
@@ -1174,13 +1175,14 @@ func (a *App) connectLocked() error {
 		return err
 	}
 	t.endpoint, t.v6Blocked, t.mtu = endpoint, strings.Contains(strings.Join(plan.Routes, ","), "::/0"), plan.MTU
-	a.tun = t
+	a.setTun(t)
 	a.meter.Reset()
 	a.logf("туннель поднят: сервер %s, маршрутов %d (+%d исключений)", endpoint, len(plan.Routes), len(plan.ExcludeRoutes))
 	return nil
 }
 
 func (a *App) Disconnect() {
+	a.abort.Store(true) // a connect in progress gives up at its next step
 	a.tunOp.Lock()
 	defer a.tunOp.Unlock()
 	a.disconnectLocked()
@@ -1189,7 +1191,7 @@ func (a *App) Disconnect() {
 func (a *App) disconnectLocked() {
 	if a.tun != nil {
 		a.tun.Close()
-		a.tun = nil
+		a.setTun(nil)
 		a.logf("отключено")
 	}
 	a.plat.Release()
@@ -1202,7 +1204,7 @@ func (a *App) Revoked() {
 	defer a.tunOp.Unlock()
 	if a.tun != nil {
 		a.tun.Close()
-		a.tun = nil
+		a.setTun(nil)
 		a.logf("система отключила VPN (включён другой VPN или он выключен в настройках)")
 	}
 }

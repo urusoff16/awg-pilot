@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"awgpilot/internal/routing"
+	"awgpilot/internal/rudomains"
 )
 
 // Settings are non-secret user preferences.
@@ -64,6 +65,15 @@ type Settings struct {
 	CheckEveryMin int    `json:"check_every_min"`
 	DeviceID      string `json:"device_id"`  // X-Device-Id; AWG Pilot's own random ID
 	UserAgent     string `json:"user_agent"` // optional override
+}
+
+// DirectDomains are the domains that bypass the VPN ("Russia past the VPN" by domain), nil when
+// that mode is off.
+func (s Settings) DirectDomains() []string {
+	if !s.Split.RussiaByDomain() {
+		return nil
+	}
+	return rudomains.List(s.Split.RussiaDomains)
 }
 
 func DefaultSettings() Settings {

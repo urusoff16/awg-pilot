@@ -110,6 +110,7 @@ func (a *App) monitor() {
 	for {
 		a.pullServiceLogs(&svcLogNext)
 		st := a.tun.Stats()
+		a.lastStats.Store(&st)
 		now := time.Now()
 		if st.Up {
 			a.meter.Add(now, st.RxBytes, st.TxBytes)

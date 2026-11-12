@@ -24,6 +24,22 @@ type Settings struct {
 	BypassLAN bool     `json:"bypass_lan"`
 	// BypassRussia sends Russian networks (RIPE NCC country list) directly instead of via the VPN.
 	BypassRussia bool `json:"bypass_russia"`
+	// RussiaMode is how BypassRussia finds Russian traffic: "" or "ip" (the default: the RIPE
+	// list of networks, exact but thousands of routes) or "domains" (*.ru, *.su, *.рф and Russian
+	// services, see package rudomains; experimental).
+	RussiaMode string `json:"russia_mode,omitempty"`
+	// RussiaDomains are the user's extra domains for the "domains" mode.
+	RussiaDomains []string `json:"russia_domains,omitempty"`
+}
+
+// RussiaByIP: Russian networks bypass the VPN by the RIPE list (routes).
+func (s Settings) RussiaByIP() bool {
+	return s.BypassRussia && s.RussiaMode != "domains" && s.Mode != ModeInclude
+}
+
+// RussiaByDomain: Russian sites bypass the VPN by domain.
+func (s Settings) RussiaByDomain() bool {
+	return s.BypassRussia && s.RussiaMode == "domains" && s.Mode != ModeInclude
 }
 
 // LAN and other non-routable IPv4 ranges kept off the tunnel when BypassLAN is set.
@@ -92,6 +108,9 @@ func Compute(ctx context.Context, s Settings, tunnelDNS []netip.Addr, r Resolver
 	}
 	if len(res.AllowedIPs) == 0 {
 		return res, fmt.Errorf("список исключений покрывает все адреса — через VPN ничего не пойдёт")
+	}
+	if s.RussiaByDomain() {
+		res.FullTunnel = false // Russian sites leave beside the tunnel: no kill switch
 	}
 	return res, nil
 }

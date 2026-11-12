@@ -32,6 +32,9 @@ type EngineOptions struct {
 	DropIPv6 bool
 	// Tap sees every packet: out=true from the system to the tunnel, false back.
 	Tap func(pkt []byte, out bool)
+	// Sniff reads the site name from each new connection (TLS, HTTP, QUIC) for routing by domain;
+	// the connection still goes to the address the app asked for.
+	Sniff bool
 }
 
 // Engine carries the packets of a VPN adapter through an Xray server: Xray's TCP/IP stack turns
@@ -136,7 +139,11 @@ func (e *Engine) HandleConnection(conn xnet.Conn, dest xnet.Destination) {
 		User:          &protocol.MemoryUser{Level: 0},
 	}
 	ctx = session.ContextWithInbound(ctx, &inbound)
-	ctx = session.ContextWithContent(ctx, &session.Content{})
+	content := &session.Content{}
+	if e.opt.Sniff {
+		content.SniffingRequest = session.SniffingRequest{Enabled: true, OverrideDestinationForProtocol: []string{"http", "tls", "quic"}, RouteOnly: true}
+	}
+	ctx = session.ContextWithContent(ctx, content)
 	ctx = session.SubContextFromMuxInbound(ctx)
 
 	var writer buf.Writer = buf.NewWriter(conn)

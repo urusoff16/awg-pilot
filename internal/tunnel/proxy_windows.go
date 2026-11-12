@@ -80,7 +80,7 @@ func (m *Manager) upProxy(o Options, logf func(string, ...any)) error {
 	}
 	xray.SetSocketHook(m.binder.Hook)
 
-	inst, err := xray.Start(link, o.ProxyAddr)
+	inst, err := xray.Start(link, o.ProxyAddr, o.Direct...)
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (m *Manager) upProxy(o Options, logf func(string, ...any)) error {
 	if m.Tap != nil {
 		dev = &tapTun{Device: tunDev, tap: m.Tap}
 	}
-	eng, err := xray.NewEngine(inst, dev, xray.EngineOptions{MTU: int(cfg.Interface.MTU), DropIPv6: blockV6})
+	eng, err := xray.NewEngine(inst, dev, xray.EngineOptions{MTU: int(cfg.Interface.MTU), DropIPv6: blockV6, Sniff: len(o.Direct) > 0})
 	if err != nil {
 		inst.Close()
 		return fmt.Errorf("не удалось запустить Xray: %w", err)

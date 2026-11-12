@@ -211,7 +211,17 @@
                     <label><input type="radio" name="mode" value="exclude"/><span>Кроме списка</span></label>
                     <label><input type="radio" name="mode" value="include"/><span>Только список</span></label>
                 </div>
-                <label class="sw"><span><b>Россия мимо VPN</b><small id="russiaInfo">Российские сайты и сервисы напрямую (список сетей RIPE NCC, обновляется раз в неделю)</small></span><input id="chkRussia" type="checkbox"/><i></i></label>
+                <label class="sw"><span><b>Россия мимо VPN</b><small id="russiaInfo">Российские сайты и сервисы напрямую</small></span><input id="chkRussia" type="checkbox"/><i></i></label>
+                <div id="russiaOpts">
+                    <div class="field"><span>Как определять</span>
+                        <select id="selRussiaMode">
+                            <option value="ip">По списку сетей</option>
+                            <option value="domains">По доменам (тест)</option>
+                        </select>
+                    </div>
+                    <textarea id="txtRuDomains" rows="3" spellcheck="false" placeholder="Свои домены, по одному в строке: example.com"></textarea>
+                    <div id="russiaModeHint" class="hint"></div>
+                </div>
                 <label class="sw"><span><b>Локальная сеть мимо VPN</b><small>192.168.x, 10.x и т.п.</small></span><input id="chkLan" type="checkbox"/><i></i></label>
                 <textarea id="txtEntries" rows="6" spellcheck="false" placeholder="Адреса, подсети и домены, по одному в строке&#10;example.com&#10;192.168.0.0/16"></textarea>
                 <div class="hint">Домены превращаются в IP при подключении. Kill switch действует только в режиме «Весь трафик».</div>

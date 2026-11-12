@@ -16,7 +16,7 @@ type autoHost struct{ a *App }
 
 func (h autoHost) Snapshot() autopilot.Snapshot {
 	a := h.a
-	st := a.tun.Stats()
+	st := a.cachedStats()
 	a.mu.Lock()
 	s := autopilot.Snapshot{Settings: a.settings, ActiveID: a.secrets.ActiveID, Profiles: store.CloneProfiles(a.secrets.Profiles)}
 	a.mu.Unlock()
