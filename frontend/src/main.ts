@@ -214,10 +214,14 @@ function render() {
 
 const rate = (bps: number) => `${bytes(bps)}${perSec()}`;
 
+// pingNow: the result of a ping the user asked for, shown for a few seconds; "…" while it runs.
+let pingNow: {text: string, until: number} | null = null;
+
 function renderSpeed(sp: AnyObj | null) {
     $('spRx').textContent = sp ? rate(sp.rx_bps) : '—';
     $('spTx').textContent = sp ? rate(sp.tx_bps) : '—';
-    $('spPing').textContent = !sp ? '—' : sp.ping_ms >= 0 ? tf('{0} мс', sp.ping_ms) : tr('нет ответа');
+    $('spPing').textContent = pingNow && Date.now() < pingNow.until ? pingNow.text
+        : !sp ? '—' : sp.ping_ms >= 0 ? tf('{0} мс', sp.ping_ms) : tr('нет ответа');
     const hist: AnyObj[] = sp?.history ?? [];
     const W = 600, H = 90, N = 120;
     const peak = Math.max(1, ...hist.map(p => Math.max(p.rx, p.tx)));
@@ -232,10 +236,17 @@ function renderSpeed(sp: AnyObj | null) {
     $('chart').parentElement!.classList.toggle('empty', hist.length < 2);
 }
 
+const roleName: AnyObj = {wifi: 'Wi-Fi', mobile: 'Моб.', wired: 'Кабель', fallback: 'Запасной'};
+const checkText = (ck: AnyObj | undefined) => !ck ? '' : (ck.ms > 0 ? tf('{0} мс', ck.ms) : (ck.err || tr('нет ответа'))) + ', ' + ago(ck.at);
+const profChecking = new Set<string>();
+const profClosed = new Set<string>(); // subscription profiles whose server list the user folded
+
 let profSig = '';
 function renderProfiles(active: AnyObj | undefined) {
     const list: AnyObj[] = state.profiles ?? [];
-    const sig = JSON.stringify([list, state.active_id]);
+    renderAuto(list);
+    renderSrvGroup(list);
+    const sig = JSON.stringify([list, state.active_id, [...profChecking], [...profClosed], lang, Math.floor(Date.now() / 30000)]);
     if (sig === profSig) return; // keep focus/hover stable between polls
     profSig = sig;
     const ic = (name: string) => `<svg><use href="#i-${name}"/></svg>`;
@@ -243,17 +254,141 @@ function renderProfiles(active: AnyObj | undefined) {
         : list.map(p => {
             const what = p.sub ? tr('подписка') + ' · ' + plural(p.servers ?? 0, ['сервер', 'сервера', 'серверов'], ['server', 'servers'])
                 : [p.has_key ? tf('ключ {0}', esc(p.masked_key)) : '', p.has_config ? tf('конфиг: {0}', esc(p.config_for || tr('есть'))) : tr('нет конфига')].filter(Boolean).join(' · ');
+            const srvLine = p.server ? `<span class="li-sub psrv1">${esc(tr('Сервер'))}: <b>${esc(p.server)}</b></span>` : '';
             const isActive = active && p.id === active.id;
             const id = esc(p.id);
+            const roles = (p.roles ?? []).map((r: string) => `<span class="gtag pref">${esc(tr(roleName[r] ?? r))}</span>`).join('');
+            const ck = profChecking.has(p.id) ? tr('проверяю…') : checkText(p.check);
+            const ckCls = profChecking.has(p.id) || !p.check ? '' : p.check.ms > 0 ? msClass(p.check) : 'bad';
             return `<li class="${isActive ? 'active' : ''}">
                 <svg class="li-ic"><use href="#i-${p.sub ? 'globe' : p.has_key ? 'key' : 'file'}"/></svg>
-                <span class="li-main"><span class="li-name">${esc(p.name)}</span><span class="li-sub" title="${what}">${what}</span></span>
+                <span class="li-main"><span class="li-name">${esc(p.name)}</span><span class="li-sub" title="${what}">${what}</span>${srvLine}`
+                + (roles ? `<span class="roles">${roles}</span>` : '')
+                + (ck ? `<span class="li-sub ck ${ckCls}">${esc(tr('Проверка'))}: ${esc(ck)}</span>` : '') + `</span>
                 <span class="li-act">
+                    ${p.has_config ? `<button class="icon" data-act="check" data-id="${id}" data-tip="${tr('Проверить связь')}" aria-label="${tr('Проверить связь')}" ${profChecking.has(p.id) ? 'disabled' : ''}>${ic('pulse')}</button>` : ''}
                     ${isActive ? `<span class="badge">${tr('активный')}</span>` : `<button class="icon ok" data-act="use" data-id="${id}" data-tip="${tr('Сделать активным')}" aria-label="${tr('Сделать активным')}">${ic('check')}</button>`}
                     <button class="icon" data-act="rename" data-id="${id}" data-tip="${tr('Переименовать')}" aria-label="${tr('Переименовать')}">${ic('edit')}</button>
                     <button class="icon del" data-act="delete" data-id="${id}" data-tip="${tr('Удалить')}" aria-label="${tr('Удалить')}">${ic('trash')}</button>
                 </span></li>`;
         }).join('');
+}
+
+// ---------- servers of subscription profiles ("Keys and profiles") ----------
+const srvPinging = new Set<string>(); // "profile|server" being pinged now
+let srvSig = '';
+function renderSrvGroup(list: AnyObj[]) {
+    const subs = list.filter(p => p.sub && (p.server_list ?? []).length);
+    $('srvGroup').classList.toggle('hidden', !subs.length);
+    const q = $<HTMLInputElement>('srvFilter').value.trim().toLowerCase();
+    const t = state.tunnel ?? {};
+    const sig = JSON.stringify([subs, q, state.active_id, t.up, state.sub?.current, [...srvPinging], [...profClosed], lang, Math.floor(Date.now() / 60000)]);
+    if (sig === srvSig) return;
+    srvSig = sig;
+    $('srvBox').innerHTML = subs.map(p => {
+        const open = !profClosed.has(p.id);
+        const all: AnyObj[] = p.server_list;
+        const shown = all.filter(s => !q || `${s.name} ${s.host} ${s.group}`.toLowerCase().includes(q));
+        const pid = esc(p.id);
+        const head = `<div class="psrvhead"><span class="psrvname">${esc(p.name)}</span><span class="grow"></span>`
+            + `<button class="ghost sm" data-act="testall" data-p="${pid}" ${p.testing ? 'disabled' : ''}><svg><use href="#i-pulse"/></svg>`
+            + `${esc(p.testing ? tf('Проверка {0}/{1}', p.tested, p.test_total) : tr('Проверить все'))}</button>`
+            + `<button class="ghost sm" data-act="fold" data-p="${pid}">${esc(open ? tr('Скрыть серверы') : tf('Серверы ({0})', all.length))}</button></div>`;
+        if (!open) return `<div class="psrvbox">${head}</div>`;
+        const rows = shown.map(s => {
+            const key = `${p.id}|${s.id}`;
+            const cur = p.id === state.active_id && t.up && s.id === state.sub?.current;
+            const ms = srvPinging.has(key) ? '…' : msText(s);
+            const age = checked(s) ? tf('проверен {0}', ago(s.at)) : tr('ещё не проверялся');
+            return `<div class="psrv ${cur ? 'cur' : ''} ${checked(s) && !fresh(s) ? 'old' : ''}" title="${esc(`${s.proto.toUpperCase()} · ${s.host}:${s.port} · ${age}` + (s.err ? ` · ${s.err}` : ''))}">`
+                + `<span class="psmain"><span class="psn">${esc(s.name)}${cur ? ` <span class="gtag pref">${esc(tr('используется'))}</span>` : ''}</span>`
+                + `<span class="psh">${esc(s.host)}${s.group ? ' · ' + esc(s.group) : ''}</span></span>`
+                + `<span class="ms ${srvPinging.has(key) ? '' : msClass(s)}">${esc(ms)}</span>`
+                + `<button class="icon" data-act="ping" data-p="${pid}" data-s="${esc(s.id)}" data-tip="${tr('Пинг')}" aria-label="${tr('Пинг')}" ${srvPinging.has(key) ? 'disabled' : ''}><svg><use href="#i-pulse"/></svg></button>`
+                + `<button class="icon ok" data-act="connect" data-p="${pid}" data-s="${esc(s.id)}" data-tip="${tr('Подключить через этот сервер')}" aria-label="${tr('Подключить через этот сервер')}"><svg><use href="#i-power"/></svg></button></div>`;
+        }).join('') || `<div class="psrv empty">${tr('Ничего не найдено')}</div>`;
+        return `<div class="psrvbox">${head}<div class="psrvlist">${rows}</div></div>`;
+    }).join('');
+}
+
+$('srvFilter').addEventListener('input', () => renderSrvGroup(state.profiles ?? []));
+$('srvBox').addEventListener('click', async ev => {
+    const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-act]');
+    if (!btn) return;
+    const pid = btn.dataset.p!, sid = btn.dataset.s ?? '';
+    const prof = (state.profiles ?? []).find((x: AnyObj) => x.id === pid);
+    const srv = (prof?.server_list ?? []).find((x: AnyObj) => x.id === sid);
+    switch (btn.dataset.act) {
+    case 'fold':
+        if (profClosed.has(pid)) profClosed.delete(pid); else profClosed.add(pid);
+        renderSrvGroup(state.profiles ?? []);
+        break;
+    case 'testall':
+        run('Проверка серверов', () => goApp().TestProfileServers(pid));
+        break;
+    case 'ping': {
+        const key = `${pid}|${sid}`;
+        srvPinging.add(key);
+        renderSrvGroup(state.profiles ?? []);
+        try {
+            const m = await goApp().PingServer(pid, sid) as AnyObj;
+            if (m.ms <= 0) banner(tf('«{0}»: {1}', srv?.name ?? sid, m.err || tr('нет ответа')));
+        } catch (e: any) {
+            banner(`${tr('Пинг')}: ${await errText(e)}`);
+        } finally {
+            srvPinging.delete(key);
+            await refresh();
+        }
+        break;
+    }
+    case 'connect':
+        run('Выбор сервера', () => goApp().ConnectServer(pid, sid), tf('Подключаюсь через «{0}» — он выбран для этой сети', srv?.name ?? sid));
+        break;
+    }
+});
+
+// ---------- profile by network ----------
+function fillProfileSelect(sel: HTMLSelectElement, list: AnyObj[], first: string, value: string) {
+    const html = `<option value="">${esc(first)}</option>` + list.filter(p => p.has_config).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    if (sel.dataset.opts !== html) {
+        sel.innerHTML = html;
+        sel.dataset.opts = html;
+    }
+    if (document.activeElement !== sel) sel.value = list.some(p => p.id === value && p.has_config) ? value : '';
+}
+
+function renderAuto(list: AnyObj[]) {
+    const s = state.settings ?? {};
+    const on = !!s.auto_profile;
+    if (document.activeElement !== $('chkAutoProfile')) $<HTMLInputElement>('chkAutoProfile').checked = on;
+    $('autoBody').classList.toggle('hidden', !on);
+    $('autoGroup').classList.toggle('hidden', list.filter(p => p.has_config).length < 2 && !on);
+    const np = s.net_profiles ?? {};
+    fillProfileSelect($<HTMLSelectElement>('selNetWifi'), list, tr('Не менять'), np.wifi ?? '');
+    fillProfileSelect($<HTMLSelectElement>('selNetMobile'), list, tr('Не менять'), np.mobile ?? '');
+    fillProfileSelect($<HTMLSelectElement>('selNetWired'), list, tr('Не менять'), np.wired ?? '');
+    fillProfileSelect($<HTMLSelectElement>('selFallback'), list, tr('Следующий по списку'), s.fallback_profile ?? '');
+    const every = s.check_every_min ?? 10, weak = s.weak_ping_ms || 300;
+    $('autoHint').textContent = tf('Если профиль для сети не отвечает или его задержка дольше минуты выше {0} мс, VPN переходит на запасной.', weak) + ' '
+        + (every > 0 ? tf('Пока работает запасной, основной проверяется в фоне раз в {0} мин и при хорошем ответе VPN возвращается на него.', every)
+            : tr('Фоновая проверка выключена (Настройки) — на основной профиль VPN вернётся только при смене сети.')) + ' '
+        + tr('Профиль, выбранный вручную, остаётся до смены сети.');
+}
+
+function saveAuto() {
+    const s: AnyObj = {...(state.settings ?? {})};
+    s.auto_profile = $<HTMLInputElement>('chkAutoProfile').checked;
+    s.net_profiles = {};
+    for (const id of ['selNetWifi', 'selNetMobile', 'selNetWired']) {
+        const sel = $<HTMLSelectElement>(id);
+        if (sel.value) s.net_profiles[sel.dataset.kind!] = sel.value;
+    }
+    s.fallback_profile = $<HTMLSelectElement>('selFallback').value;
+    // A first switch-on with nothing chosen: the active profile for every network.
+    if (s.auto_profile && !Object.keys(s.net_profiles).length && state.active_id) {
+        for (const k of ['wifi', 'mobile', 'wired']) s.net_profiles[k] = state.active_id;
+    }
+    run('Профиль по сети', () => Go.SaveSettings(s as any), 'Сохранено');
 }
 
 // ---------- proxy subscription ----------
@@ -276,15 +411,19 @@ function ruleLabel(rule: string, sub: AnyObj): string {
 }
 
 const checked = (s: AnyObj) => !!s.at && !String(s.at).startsWith('0001');
-const msText = (s: AnyObj) => !checked(s) ? '—' : s.ms > 0 ? tf('{0} мс', s.ms) : tr('нет ответа');
-const msClass = (s: AnyObj) => !checked(s) ? '' : s.ms <= 0 ? 'bad' : s.ms < 400 ? 'good' : s.ms < 1200 ? 'mid' : 'bad';
+const FRESH_MS = 30 * 60 * 1000; // older checks are shown dimmed and left out of the server choice lists
+const fresh = (s: AnyObj) => checked(s) && Date.now() - Date.parse(s.at) < FRESH_MS;
+// rechecking: a check of all servers is running and this one has not been reached yet
+const rechecking = (s: AnyObj) => !!state.sub?.testing && checked(s) && !!state.sub.test_started && Date.parse(s.at) < Date.parse(state.sub.test_started);
+const msText = (s: AnyObj) => rechecking(s) ? '…' : !checked(s) ? '—' : s.ms > 0 ? tf('{0} мс', s.ms) : tr('нет ответа');
+const msClass = (s: AnyObj) => rechecking(s) || !checked(s) ? '' : s.ms <= 0 ? 'bad' : s.ms < 400 ? 'good' : s.ms < 1200 ? 'mid' : 'bad';
 
 function ruleOptions(sub: AnyObj, kind: string): string {
     const opt = (v: string, label: string) => `<option value="${esc(v)}">${esc(label)}</option>`;
     let html = opt('', tf('По умолчанию: {0}', ruleLabel(sub.defaults?.[kind] ?? 'auto', sub))) + opt('auto', tr('Самый быстрый'));
     for (const g of sub.groups ?? []) html += opt(`auto:${g}`, tf('Самый быстрый из {0}', g)) + opt(`auto:!${g}`, tf('Самый быстрый, кроме {0}', g));
     html += `<optgroup label="${esc(tr('Конкретный сервер'))}">`
-        + (sub.servers ?? []).map((s: AnyObj) => opt(`server:${s.id}`, s.name + (s.ms > 0 ? ` · ${tf('{0} мс', s.ms)}` : ''))).join('') + '</optgroup>';
+        + (sub.servers ?? []).map((s: AnyObj) => opt(`server:${s.id}`, s.name + (s.ms > 0 && fresh(s) && !rechecking(s) ? ` · ${tf('{0} мс', s.ms)}` : ''))).join('') + '</optgroup>';
     return html;
 }
 
@@ -314,6 +453,10 @@ function renderSub(sub: AnyObj | null | undefined) {
     fillRuleSelect($<HTMLSelectElement>('selRuleWired'), sub, 'wired');
     $('subTestText').textContent = sub.testing ? tf('Проверка {0}/{1}', sub.tested, sub.test_total) : tr('Проверить');
     ($('btnSubTest') as HTMLButtonElement).disabled = !!sub.testing;
+    $('subTestText2').textContent = sub.testing ? tf('Проверка {0}/{1}', sub.tested, sub.test_total) : tr('Проверить все серверы');
+    ($('btnSubTest2') as HTMLButtonElement).disabled = !!sub.testing;
+    const lastAt = Math.max(0, ...(sub.servers ?? []).filter(checked).map((s: AnyObj) => Date.parse(s.at)));
+    $('subChecked').textContent = lastAt ? tf('Последняя проверка: {0}', ago(new Date(lastAt).toISOString())) : tr('Серверы ещё не проверялись');
     $('btnSubUpdate').classList.toggle('hidden', !sub.has_url);
     $('subAnnounce').classList.toggle('hidden', !sub.announce);
     $('subAnnounce').textContent = sub.announce ?? '';
@@ -337,7 +480,7 @@ function renderSub(sub: AnyObj | null | undefined) {
 
     // server list: grouped, the one in use marked, the ones the rule passes over dimmed
     const rule = sub.rules?.[kind] ?? 'auto';
-    const sig = JSON.stringify([sub.servers, sub.current, rule, t.up, t.server_name, lang]);
+    const sig = JSON.stringify([sub.servers, sub.current, rule, t.up, t.server_name, lang, sub.testing, sub.test_started, Math.floor(Date.now() / 60000)]);
     if (sig === subSig) return;
     subSig = sig;
     const groups: string[] = [...(sub.groups ?? []), ''];
@@ -350,7 +493,8 @@ function renderSub(sub: AnyObj | null | undefined) {
         html += part.map(s => {
             const cur = s.id === sub.current && t.up;
             const title = `${s.proto.toUpperCase()} · ${s.host}:${s.port}` + (s.err ? ` · ${s.err}` : '');
-            return `<li class="${cur ? 'cur' : ''} ${prefers(rule, s) ? '' : 'dim'}" data-srv="${esc(s.id)}" title="${esc(title)}">`
+            const age = checked(s) ? ' · ' + tf('проверен {0}', ago(s.at)) : '';
+            return `<li class="${cur ? 'cur' : ''} ${prefers(rule, s) ? '' : 'dim'} ${checked(s) && !fresh(s) ? 'old' : ''}" data-srv="${esc(s.id)}" title="${esc(title + age)}">`
                 + `<span class="li-main"><span class="li-name">${esc(s.name)}</span><span class="li-sub">${esc(s.proto.toUpperCase())} · ${esc(s.host)}${cur ? ' · ' + tr('используется') : ''}</span></span>`
                 + `<span class="ms ${msClass(s)}">${esc(msText(s))}</span></li>`;
         }).join('');
@@ -539,6 +683,9 @@ function fillSettings(s: AnyObj) {
     $<HTMLInputElement>('inpDNS').value = (s.custom_dns ?? []).join(', ');
     $<HTMLInputElement>('inpDNS').disabled = (s.dns_preset || 'provider') !== 'custom';
     $<HTMLInputElement>('inpMTU').value = String(s.mtu ?? 0);
+    $<HTMLSelectElement>('selCheckEvery').value = String(s.check_every_min ?? 10);
+    if ($<HTMLSelectElement>('selCheckEvery').selectedIndex < 0) $<HTMLSelectElement>('selCheckEvery').value = '10';
+    $<HTMLInputElement>('inpWeakPing').value = String(s.weak_ping_ms || 300);
     const mode = s.split?.mode || 'full';
     document.querySelectorAll<HTMLInputElement>('input[name=mode]').forEach(r => r.checked = r.value === mode);
     $<HTMLInputElement>('chkLan').checked = !!s.split?.bypass_lan;
@@ -568,6 +715,8 @@ function collectSettings(): AnyObj {
     s.dns_preset = $<HTMLSelectElement>('selDNS').value;
     s.custom_dns = $<HTMLInputElement>('inpDNS').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean);
     s.mtu = Number($<HTMLInputElement>('inpMTU').value) || 0;
+    s.check_every_min = Number($<HTMLSelectElement>('selCheckEvery').value) || 0;
+    s.weak_ping_ms = Number($<HTMLInputElement>('inpWeakPing').value) || 300;
     s.country = $<HTMLSelectElement>('selCountry').value;
     s.key_type = $<HTMLSelectElement>('selKeyType').value;
     const mode = document.querySelector<HTMLInputElement>('input[name=mode]:checked')?.value ?? 'full';
@@ -615,7 +764,7 @@ document.querySelectorAll<HTMLButtonElement>('.tab[data-tab]').forEach(btn => bt
     refresh();
 }));
 
-['chkKill', 'chkIPv6', 'chkTray', 'chkReconnect', 'chkAuto', 'chkAutoChange', 'chkLockdown', 'chkNotify', 'chkSubscription', 'selDNS', 'inpDNS', 'inpMTU', 'chkLan', 'chkRussia', 'txtEntries'].forEach(id =>
+['chkKill', 'chkIPv6', 'chkTray', 'chkReconnect', 'chkAuto', 'chkAutoChange', 'chkLockdown', 'chkNotify', 'chkSubscription', 'selDNS', 'inpDNS', 'inpMTU', 'selCheckEvery', 'inpWeakPing', 'chkLan', 'chkRussia', 'txtEntries'].forEach(id =>
     $(id).addEventListener('input', () => {
         settingsDirty = true;
         $<HTMLInputElement>('inpDNS').disabled = $<HTMLSelectElement>('selDNS').value !== 'custom';
@@ -743,7 +892,20 @@ $('profList').addEventListener('click', async ev => {
     const id = btn.dataset.id!;
     const p = (state.profiles ?? []).find((x: AnyObj) => x.id === id);
     if (!p) return;
-    if (btn.dataset.act === 'use') {
+    if (btn.dataset.act === 'check') {
+        // not through run(): a check takes up to half a minute and must not block the window
+        profChecking.add(id);
+        render();
+        try {
+            const ck = await goApp().CheckProfile(id) as AnyObj;
+            banner(tf('«{0}»: {1}', p.name, ck.ms > 0 ? tf('{0} мс', ck.ms) : await errText(ck.err || tr('нет ответа'))), ck.ms > 0 ? 'ok' : 'err');
+        } catch (e: any) {
+            banner(`${tr('Проверка профиля')}: ${await errText(e)}`);
+        } finally {
+            profChecking.delete(id);
+            await refresh();
+        }
+    } else if (btn.dataset.act === 'use') {
         run('Профиль', () => Go.SelectProfile(id), tf('Выбран профиль «{0}»', p.name));
     } else if (btn.dataset.act === 'rename') {
         const name = await ask(tr('Переименовать профиль'), '', {ok: tr('Сохранить'), input: p.name});
@@ -755,6 +917,8 @@ $('profList').addEventListener('click', async ev => {
 });
 $('btnRefresh').onclick = () => run('Статус подписки', () => Go.RefreshAccount());
 $('btnSubTest').onclick = () => run('Проверка серверов', () => goApp().TestServers());
+$('btnSubTest2').onclick = () => run('Проверка серверов', () => goApp().TestServers());
+['chkAutoProfile', 'selNetWifi', 'selNetMobile', 'selNetWired', 'selFallback'].forEach(id => $(id).addEventListener('change', saveAuto));
 $('btnSubUpdate').onclick = () => run('Обновление подписки', () => goApp().UpdateSubscription(), 'Подписка обновлена');
 $('srvList').addEventListener('click', ev => {
     const li = (ev.target as HTMLElement).closest<HTMLElement>('li[data-srv]');
@@ -899,5 +1063,29 @@ async function startSpeedTest() {
     pollSpeed();
 }
 $('btnSpeed').onclick = startSpeedTest;
+
+// A tap on the ping checks the active profile now: through the tunnel while connected, and
+// without connecting while the VPN is off.
+async function pingActive() {
+    const id = state.active_id;
+    if (!id || (pingNow && pingNow.text === '…' && Date.now() < pingNow.until)) return;
+    pingNow = {text: '…', until: Date.now() + 60000};
+    $('pingMetric').classList.add('busy');
+    renderSpeed(state.tunnel?.up ? state.speed : null);
+    try {
+        const ck = await goApp().CheckProfile(id) as AnyObj;
+        const text = ck.ms > 0 ? tf('{0} мс', ck.ms) : tr('нет ответа');
+        pingNow = {text, until: Date.now() + 6000};
+        if (ck.ms <= 0) banner(tf('Пинг: {0}', await errText(ck.err || tr('нет ответа'))));
+    } catch (e: any) {
+        pingNow = null;
+        banner(tf('Пинг: {0}', await errText(e)));
+    } finally {
+        $('pingMetric').classList.remove('busy');
+        renderSpeed(state.tunnel?.up ? state.speed : null);
+    }
+}
+$('pingMetric').onclick = pingActive;
+$('pingMetric').onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pingActive(); } };
 $('stAgain').onclick = startSpeedTest;
 $('stClose').onclick = () => { $('speedSheet').classList.add('hidden'); window.clearTimeout(speedPoll); };

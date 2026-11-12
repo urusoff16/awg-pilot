@@ -31,6 +31,8 @@ type subState struct {
 	failed  map[string]bool // servers that did not work in this recovery round
 	kind    string          // network kind the tunnel was brought up for
 	testing atomic.Bool     // a server check is running
+	// testingID is the profile whose servers the running check measures.
+	testingID string
 	// lastCheck is when servers were last checked for a recovery or a connect.
 	lastCheck time.Time
 	tested    atomic.Int32 // servers checked so far in it
@@ -197,6 +199,7 @@ func (a *App) testServers(id string, only []subscription.Server) {
 	a.sub.total.Store(int32(len(list)))
 	a.sub.mu.Lock()
 	a.sub.lastCheck = time.Now()
+	a.sub.testingID = id
 	a.sub.mu.Unlock()
 	ok := 0
 	for start := 0; start < len(list); start += subTestChunk {

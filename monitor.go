@@ -8,6 +8,7 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"awgpilot/internal/autopilot"
 	"awgpilot/internal/health"
 	"awgpilot/internal/i18n"
 	"awgpilot/internal/tunnel"
@@ -273,9 +274,15 @@ func (a *App) watchdog() {
 		stage, actionAt := a.rec.stage, a.rec.actionAt
 		moreProfiles := a.rec.failovers < profiles-1
 		a.rec.mu.Unlock()
-		if isSub && netChanged && enabled {
-			a.subNetChanged(st.NetKind) // Wi-Fi ↔ mobile: maybe another server for the new network
-			continue
+		if netChanged && enabled {
+			// Wi-Fi ↔ mobile: maybe another profile, or another server, for the new network
+			if a.auto != nil && a.auto.NetChanged(st.NetKind) {
+				continue
+			}
+			if isSub {
+				a.subNetChanged(st.NetKind)
+				continue
+			}
 		}
 
 		dead, why := health.Dead(in)
@@ -419,6 +426,14 @@ func (a *App) selectNextProfile() (name string, needConfig, ok bool) {
 	for i, p := range a.secrets.Profiles {
 		if p.ID == a.secrets.ActiveID {
 			cur = i
+		}
+	}
+	// With the profile choice by network, its fallback comes first.
+	if id := autopilot.NextProfile(a.settings, tunnel.NetKind(), a.secrets.ActiveID, a.secrets.Profiles); id != "" {
+		for i, p := range a.secrets.Profiles {
+			if p.ID == id {
+				cur = (i - 1 + n) % n
+			}
 		}
 	}
 	for i := 1; i < n; i++ {

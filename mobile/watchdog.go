@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"awgpilot/internal/autopilot"
 	"awgpilot/internal/health"
 )
 
@@ -227,6 +228,14 @@ func (a *App) tryFailover() bool {
 		}
 	}
 	name, needConfig, ok := "", false, false
+	// With the profile choice by network, its fallback comes first.
+	if id := autopilot.NextProfile(a.settings, a.netKind(), a.secrets.ActiveID, a.secrets.Profiles); id != "" {
+		for i, p := range a.secrets.Profiles {
+			if p.ID == id {
+				cur = (i - 1 + n) % n
+			}
+		}
+	}
 	for i := 1; i < n; i++ {
 		p := a.secrets.Profiles[(cur+i)%n]
 		if !p.Usable() && p.VPNKey == "" {

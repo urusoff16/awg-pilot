@@ -24,6 +24,8 @@ type subState struct {
 	failed  map[string]bool // servers that did not work in this recovery round
 	kind    string          // network kind the tunnel was brought up for
 	testing atomic.Bool
+	// testingID is the profile whose servers the running check measures.
+	testingID string
 	// lastCheck is when servers were last checked for a recovery or a connect.
 	lastCheck time.Time
 	tested    atomic.Int32
@@ -186,13 +188,17 @@ func (a *App) testServers(id string, only []subscription.Server) {
 	a.sub.total.Store(int32(len(list)))
 	a.sub.mu.Lock()
 	a.sub.lastCheck = time.Now()
+	a.sub.testingID = id
 	a.sub.mu.Unlock()
 	links := make([]string, len(list))
 	for i, s := range list {
 		links[i] = s.Link
 	}
 	var ok atomic.Int32
-	xray.TestAll(context.Background(), links, 8, 6*time.Second, func(i int, r xray.Result) {
+	// A bound on the whole check: a server that hangs must not keep "checking" on screen forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	xray.TestAll(ctx, links, 8, 6*time.Second, func(i int, r xray.Result) {
 		if r.Ms > 0 {
 			ok.Add(1)
 		}
@@ -421,6 +427,12 @@ func (a *App) SetNetKind(kind string) {
 	a.kind.Store(kind)
 	if kind == "" {
 		return
+	}
+	if a.auto != nil && a.auto.NetChanged(kind) {
+		a.sub.mu.Lock()
+		a.sub.kind, a.sub.failed = kind, nil
+		a.sub.mu.Unlock()
+		return // moved to the profile for this network
 	}
 	a.tunOp.Lock()
 	t, _ := a.tun.(*proxyTunnel)

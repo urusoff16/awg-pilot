@@ -192,6 +192,29 @@ func kindOf(luid winipcfg.LUID) string {
 	return ""
 }
 
+// indexBinder records the interface bindSocketRoute chooses instead of binding anything.
+type indexBinder struct{ v4, v6 uint32 }
+
+func (b *indexBinder) BindSocketToInterface4(index uint32, _ bool) error { b.v4 = index; return nil }
+func (b *indexBinder) BindSocketToInterface6(index uint32, _ bool) error { b.v6 = index; return nil }
+
+// PhysicalIndex returns the interfaces (IPv4, IPv6; 0 = none) of the best default routes over the
+// physical network: not this program's adapter, nor another VPN's while a physical one exists.
+func (m *Manager) PhysicalIndex() (v4, v6 uint32) {
+	m.mu.Lock()
+	ours := winipcfg.LUID(0)
+	if m.nativeTun != nil {
+		ours = winipcfg.LUID(m.nativeTun.LUID())
+	}
+	m.mu.Unlock()
+	b := &indexBinder{}
+	for _, family := range []winipcfg.AddressFamily{windows.AF_INET, windows.AF_INET6} {
+		last, lastIndex := winipcfg.LUID(0), ^uint32(0)
+		bindSocketRoute(family, b, ours, &last, &lastIndex, false, true, func(string, ...any) {}, nil)
+	}
+	return b.v4, b.v6
+}
+
 // WithPhysicalSockets runs f with Xray's sockets pinned to the physical network, as they are
 // while a subscription tunnel runs. Server checks then measure the path the tunnel will take,
 // not another VPN that happens to hold the default route (its servers may be reachable through

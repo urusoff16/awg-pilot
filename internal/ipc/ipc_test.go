@@ -54,9 +54,11 @@ func (f *fakeBackend) Logs(since int) ([]string, int) {
 	}
 	return all[since:], len(all)
 }
-func (f *fakeBackend) Flows(day string) flows.Report { return flows.Report{Day: day} }
-func (f *fakeBackend) SetFlowLog(bool) error         { return nil }
-func (f *fakeBackend) ClearFlows() error             { return nil }
+func (f *fakeBackend) Flows(day string) flows.Report  { return flows.Report{Day: day} }
+func (f *fakeBackend) SetFlowLog(bool) error          { return nil }
+func (f *fakeBackend) ClearFlows() error              { return nil }
+func (f *fakeBackend) ProbeAWG(string) (int64, error) { return 42, nil }
+
 func (f *fakeBackend) TestServers(l []string) []xray.Result {
 	out := make([]xray.Result, len(l))
 	for i := range out {

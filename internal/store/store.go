@@ -49,12 +49,26 @@ type Settings struct {
 	// "include" (only AppPackages) or "exclude" (all except AppPackages).
 	AppMode     string   `json:"app_mode"`
 	AppPackages []string `json:"app_packages"`
-	DeviceID    string   `json:"device_id"`  // X-Device-Id; AWG Pilot's own random ID
-	UserAgent   string   `json:"user_agent"` // optional override
+	// AutoProfile picks the profile by the kind of network (NetProfiles), moves to FallbackProfile
+	// while the chosen one is weak or down and comes back once background checks find it good.
+	AutoProfile bool `json:"auto_profile"`
+	// NetProfiles maps a kind of network ("wifi", "mobile", "wired") to a profile ID.
+	NetProfiles map[string]string `json:"net_profiles,omitempty"`
+	// FallbackProfile carries the traffic while the profile for the network is weak; "" = the
+	// next usable profile.
+	FallbackProfile string `json:"fallback_profile,omitempty"`
+	// WeakPingMs: a profile whose delay stays above this (or loses half the checks) is weak.
+	WeakPingMs int `json:"weak_ping_ms"`
+	// CheckEveryMin is how often servers are checked in the background while the VPN is on
+	// (subscription servers, and the main profile while a fallback carries the traffic); 0 = off.
+	CheckEveryMin int    `json:"check_every_min"`
+	DeviceID      string `json:"device_id"`  // X-Device-Id; AWG Pilot's own random ID
+	UserAgent     string `json:"user_agent"` // optional override
 }
 
 func DefaultSettings() Settings {
 	return Settings{DNSPreset: "provider", Reconnect: true, BlockIPv6: true, CloseToTray: true, Notifications: true, CheckSubscription: true,
+		WeakPingMs: 300, CheckEveryMin: 10,
 		Split: routing.Settings{Mode: routing.ModeFull}}
 }
 

@@ -91,7 +91,7 @@
             <div class="metrics">
                 <div class="metric"><svg class="mi rx"><use href="#i-down"/></svg><div><div id="spRx" class="mv">—</div><div class="mk">Загрузка</div></div></div>
                 <div class="metric"><svg class="mi tx"><use href="#i-up"/></svg><div><div id="spTx" class="mv">—</div><div class="mk">Отдача</div></div></div>
-                <div class="metric"><svg class="mi ping"><use href="#i-pulse"/></svg><div><div id="spPing" class="mv">—</div><div class="mk">Пинг</div></div></div>
+                <div id="pingMetric" class="metric tap" role="button" tabindex="0" title="Нажмите, чтобы проверить пинг сейчас"><svg class="mi ping"><use href="#i-pulse"/></svg><div><div id="spPing" class="mv">—</div><div class="mk">Пинг</div></div></div>
             </div>
             <div class="card chart">
                 <svg id="chart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-label="Скорость за 2 минуты">
@@ -151,6 +151,25 @@
                 <div class="hint">Подписки VLESS, Trojan, Shadowsocks и VMess (ссылка https://… из бота или личного кабинета провайдера) работают через движок Xray. Каждый ключ, конфиг или подписка — отдельный профиль. <span class="desk-only">Хранятся только на этом ПК, зашифрованы Windows DPAPI. Переключать можно и из трея.</span><span class="android-only">Хранятся только на этом телефоне, зашифрованы ключом из Android Keystore.</span></div>
             </div>
 
+            <div id="autoGroup" class="group">
+                <div class="gt">Профиль по сети</div>
+                <label class="sw"><span><b>Выбирать профиль по сети</b><small>Свой профиль для Wi-Fi, мобильного интернета и кабеля; запасной — пока основной работает плохо</small></span><input id="chkAutoProfile" type="checkbox"/><i></i></label>
+                <div id="autoBody">
+                    <div class="field"><span><svg class="ni"><use href="#i-wifi"/></svg>Wi-Fi</span><select id="selNetWifi" data-kind="wifi"></select></div>
+                    <div class="field"><span><svg class="ni"><use href="#i-cell"/></svg>Мобильный интернет</span><select id="selNetMobile" data-kind="mobile"></select></div>
+                    <div class="field"><span><svg class="ni"><use href="#i-cable"/></svg>Кабель</span><select id="selNetWired" data-kind="wired"></select></div>
+                    <div class="field"><span><svg class="ni"><use href="#i-swap"/></svg>Запасной</span><select id="selFallback"></select></div>
+                    <div id="autoHint" class="hint"></div>
+                </div>
+            </div>
+
+            <div id="srvGroup" class="group hidden">
+                <div class="gt">Серверы</div>
+                <input id="srvFilter" class="srvfilter" placeholder="Поиск: страна, город, адрес" autocomplete="off" spellcheck="false"/>
+                <div id="srvBox"></div>
+                <div class="hint">Пинг — полный запрос через сервер. Кнопка питания у сервера подключает VPN через этот сервер и оставляет его для текущей сети (Wi-Fi, мобильной или кабеля), пока вы не выберете другой. Вернуть автовыбор — «По умолчанию» в блоке «Выбор сервера по сети».</div>
+            </div>
+
             <div id="subInfoGroup" class="group hidden">
                 <div class="gt">Подписка</div>
                 <div id="subInfo" class="card kv"></div>
@@ -162,6 +181,7 @@
                 <div class="field"><span><svg class="ni"><use href="#i-wifi"/></svg>Wi-Fi</span><select id="selRuleWifi" data-kind="wifi"></select></div>
                 <div class="field"><span><svg class="ni"><use href="#i-cell"/></svg>Мобильный интернет</span><select id="selRuleMobile" data-kind="mobile"></select></div>
                 <div class="field"><span><svg class="ni"><use href="#i-cable"/></svg>Кабель</span><select id="selRuleWired" data-kind="wired"></select></div>
+                <div class="row checkrow"><button id="btnSubTest2" class="ghost sm"><svg><use href="#i-pulse"/></svg><span id="subTestText2">Проверить все серверы</span></button><span id="subChecked" class="hint"></span></div>
                 <div class="hint">При смене сети AWG Pilot сам переходит на сервер для неё. Если выбранные серверы не отвечают, по очереди пробуются остальные — от самого быстрого. Телефон, раздающий интернет по USB, считается мобильной сетью.</div>
             </div>
 
@@ -292,6 +312,22 @@
                 <div class="gt">Уведомления</div>
                 <label class="sw"><span><b>Уведомления</b><small>Потеря связи, восстановление, скорость в шторке</small></span><input id="chkNotify" type="checkbox"/><i></i></label>
                 <label class="sw"><span><b>Следить за подпиской</b><small>Проверка раз в 6 часов, предупреждение за 3 дня</small></span><input id="chkSubscription" type="checkbox"/><i></i></label>
+            </div>
+
+            <div class="group">
+                <div class="gt">Проверка серверов</div>
+                <div class="field"><span>Фоновая проверка <small>пока VPN включён</small></span>
+                    <select id="selCheckEvery">
+                        <option value="0">Выключена</option>
+                        <option value="5">Раз в 5 минут</option>
+                        <option value="10">Раз в 10 минут</option>
+                        <option value="15">Раз в 15 минут</option>
+                        <option value="30">Раз в 30 минут</option>
+                        <option value="60">Раз в час</option>
+                    </select>
+                </div>
+                <div class="field"><span>Слабая связь <small>задержка выше, мс</small></span><input id="inpWeakPing" type="number" min="100" max="5000" step="50"/></div>
+                <div class="hint">Серверы подписки проверяются в фоне, чтобы при смене сети или сбое VPN сразу брал самый быстрый из работающих. Если задержка дольше минуты выше порога, VPN переходит на заметно более быстрый сервер подписки, а с основного профиля — на запасной.</div>
             </div>
 
             <div class="group">

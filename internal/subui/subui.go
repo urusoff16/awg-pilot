@@ -36,6 +36,7 @@ type View struct {
 	Testing     bool              `json:"testing"`
 	Tested      int               `json:"tested"`
 	TestTotal   int               `json:"test_total"`
+	TestStarted time.Time         `json:"test_started"` // servers checked before this are being checked again
 }
 
 // Server is one server of the view.
@@ -55,6 +56,7 @@ type Server struct {
 type Progress struct {
 	Testing       bool
 	Tested, Total int
+	Started       time.Time
 }
 
 // New builds the view of s for a device on a network of kind.
@@ -62,7 +64,7 @@ func New(s *store.Subscription, kind string, pr Progress) *View {
 	v := &View{HasURL: s.URL != "", Title: s.Info.Title, Announce: s.Info.Announce, SupportURL: s.Info.SupportURL, WebPage: s.Info.WebPage,
 		Used: s.Info.Upload + s.Info.Download, Total: s.Info.Total, Expire: s.Info.Expire, Updated: s.Updated, UpdateHours: s.Info.UpdateHours,
 		Groups: subscription.Groups(s.Servers), Rules: map[string]string{}, Defaults: map[string]string{}, Custom: map[string]string{},
-		Current: s.Current, NetKind: kind, Testing: pr.Testing, Tested: pr.Tested, TestTotal: pr.Total}
+		Current: s.Current, NetKind: kind, Testing: pr.Testing, Tested: pr.Tested, TestTotal: pr.Total, TestStarted: pr.Started}
 	if u, err := url.Parse(s.URL); err == nil {
 		v.Host = u.Hostname()
 	}

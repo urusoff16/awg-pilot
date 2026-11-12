@@ -1,8 +1,8 @@
 # Builds AWG Pilot for Android without Gradle: Go core (NDK) -> web UI (Vite) -> aapt2 -> javac -> d8 -> zip -> zipalign -> apksigner.
 # Output: build\android\awgpilot-<version>.apk
 param(
-    [string]$Version = "0.10.0",
-    [int]$VersionCode = 1000,
+    [string]$Version = "0.11.0",
+    [int]$VersionCode = 1100,
     [string[]]$Abis = @("arm64-v8a", "armeabi-v7a", "x86_64"),
     [string]$SigningDir = "D:\CLAUDE_CODE\tools\awgpilot-signing"
 )

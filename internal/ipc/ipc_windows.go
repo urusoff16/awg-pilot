@@ -60,6 +60,9 @@ type Request struct {
 	// Links are subscription servers to measure (test). The service measures them because only it
 	// can send around a running tunnel, straight over the physical network.
 	Links []string `json:"links,omitempty"`
+	// Config is an AmneziaWG config to check without the tunnel (probe), for the profile choice
+	// by network: the service checks it straight over the physical network.
+	Config string `json:"config,omitempty"`
 }
 
 type Response struct {
@@ -70,6 +73,7 @@ type Response struct {
 	Next    int           `json:"next,omitempty"`
 	Flows   *flows.Report `json:"flows,omitempty"`
 	Results []xray.Result `json:"results,omitempty"`
+	Ms      int64         `json:"ms,omitempty"` // probe: delay through the server
 }
 
 // Backend is what the service exposes over the pipe.
@@ -84,6 +88,7 @@ type Backend interface {
 	SetFlowLog(on bool) error
 	ClearFlows() error
 	TestServers(links []string) []xray.Result
+	ProbeAWG(config string) (int64, error)
 }
 
 // ---- server -------------------------------------------------------------------------------
@@ -171,6 +176,12 @@ func dispatch(req Request, b Backend, version string) Response {
 			return Response{Error: "слишком много серверов в одной проверке"}
 		}
 		return Response{Results: b.TestServers(req.Links)}
+	case "probe":
+		ms, err := b.ProbeAWG(req.Config)
+		if err != nil {
+			return Response{Error: err.Error()}
+		}
+		return Response{Ms: ms}
 	}
 	return Response{Error: "неизвестная команда " + req.Op}
 }
@@ -324,6 +335,19 @@ func (c *Client) SetFlowLog(on bool) error {
 func (c *Client) ClearFlows() error {
 	_, err := c.call(Request{Op: "flowclear"}, 10*time.Second)
 	return err
+}
+
+// ProbeAWG checks the server of an AmneziaWG config without bringing it up and returns the delay
+// of a request through it, in milliseconds.
+func (c *Client) ProbeAWG(config string) (int64, error) {
+	r, err := c.call(Request{Op: "probe", Config: config}, time.Minute)
+	if err != nil {
+		return -1, err
+	}
+	if r.Ms <= 0 {
+		return -1, errors.New("служба не умеет проверять профили — обновите программу")
+	}
+	return r.Ms, nil
 }
 
 // TestServers measures subscription servers (at most maxTestLinks per call) and returns one

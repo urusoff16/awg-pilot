@@ -16,8 +16,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"golang.org/x/sys/windows/svc"
 
+	"awgpilot/internal/awgprobe"
 	"awgpilot/internal/flows"
 	"awgpilot/internal/ipc"
 	"awgpilot/internal/netstat"
@@ -367,6 +369,29 @@ func (b *backend) TestServers(links []string) []xray.Result {
 	var res []xray.Result
 	b.tun.WithPhysicalSockets(func() { res = xray.TestAll(context.Background(), links, 8, 6*time.Second, nil) })
 	return res
+}
+
+// ProbeAWG checks an AmneziaWG server for the profile choice by network. Its socket is pinned to
+// the physical network, past this program's tunnel and any other VPN.
+func (b *backend) ProbeAWG(config string) (int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	return awgprobe.Probe(ctx, config, func(bind conn.Bind) error {
+		bs, ok := bind.(conn.BindSocketToInterface)
+		if !ok {
+			return nil
+		}
+		v4, v6 := b.tun.PhysicalIndex()
+		if v4 != 0 {
+			if err := bs.BindSocketToInterface4(v4, false); err != nil {
+				return err
+			}
+		}
+		if v6 != 0 {
+			bs.BindSocketToInterface6(v6, false)
+		}
+		return nil
+	})
 }
 
 // shutdown runs when the service stops: the tunnel goes, but a requested lockdown is kept by

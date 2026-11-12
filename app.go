@@ -16,7 +16,9 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"awgpilot/internal/autopilot"
 	"awgpilot/internal/autostart"
+	"awgpilot/internal/awgconf"
 	"awgpilot/internal/flows"
 	"awgpilot/internal/i18n"
 	"awgpilot/internal/ipc"
@@ -33,7 +35,7 @@ import (
 	"awgpilot/internal/vpnkey"
 )
 
-const appVersion = "0.10.0"
+const appVersion = "0.11.0"
 
 var dnsPresets = map[string][]string{
 	"cloudflare": {"1.1.1.1", "1.0.0.1"},
@@ -77,7 +79,8 @@ type App struct {
 	usage        *usage.Store
 	russiaStatus string // "N сетей, обновлён DD.MM.YYYY" after the list was loaded
 	speed        speedtest.Tracker
-	sub          subState // proxy subscriptions: server checks and recovery
+	sub          subState              // proxy subscriptions: server checks and recovery
+	auto         *autopilot.Controller // profile by network, fallback and background checks
 }
 
 // activateLocked derives per-profile state (decoded key, account data) from the active
@@ -173,6 +176,8 @@ func (a *App) startup(ctx context.Context) {
 	go a.watchdog()
 	go a.subscriptionWatcher()
 	go a.subUpdater()
+	a.auto = autopilot.New(autoHost{a})
+	go a.auto.Run(a.stop)
 	if p := a.secrets.Active(); a.settings.AutoConnect && p != nil && p.Usable() {
 		go func() {
 			a.announce.Store(true)
@@ -327,10 +332,11 @@ type State struct {
 	Usage        usage.Summary          `json:"usage"`
 	RussiaList   string                 `json:"russia_list"` // status of the Russian networks list
 	SpeedTest    speedtest.State        `json:"speedtest"`
-	Lang         string                 `json:"lang"`      // interface language in effect: "ru" or "en"
-	OtherVPN     string                 `json:"other_vpn"` // adapter of another VPN that carries the traffic instead
-	Sub          *subui.View            `json:"sub"`       // the active profile's proxy subscription, if it is one
-	NetKind      string                 `json:"net_kind"`  // "wifi", "mobile", "wired" or ""
+	Lang         string                 `json:"lang"`          // interface language in effect: "ru" or "en"
+	OtherVPN     string                 `json:"other_vpn"`     // adapter of another VPN that carries the traffic instead
+	Sub          *subui.View            `json:"sub"`           // the active profile's proxy subscription, if it is one
+	NetKind      string                 `json:"net_kind"`      // "wifi", "mobile", "wired" or ""
+	AutoChecking bool                   `json:"auto_checking"` // a background check of profiles or servers runs
 }
 
 // ProfileInfo is a secret-free description of a profile.
@@ -344,6 +350,18 @@ type ProfileInfo struct {
 	ConfigFor string `json:"config_for"`
 	Sub       bool   `json:"sub"`     // a proxy subscription (or server links)
 	Servers   int    `json:"servers"` // its number of servers
+	// Check is the last check of the profile (background or by the user).
+	Check *autopilot.Check `json:"check,omitempty"`
+	// Roles: the networks the profile is chosen for ("wifi", "mobile", "wired") and "fallback".
+	Roles []string `json:"roles,omitempty"`
+	// Server is the VPN server of a config profile (host:port as written in the config).
+	Server string `json:"server,omitempty"`
+	// ServerList are the servers of a subscription profile with their last checks.
+	ServerList []subui.Server `json:"server_list,omitempty"`
+	// Testing: a check of this profile's servers runs (Tested of TestTotal done).
+	Testing   bool `json:"testing,omitempty"`
+	Tested    int  `json:"tested,omitempty"`
+	TestTotal int  `json:"test_total,omitempty"`
 }
 
 // SpeedInfo is the live throughput and latency through the tunnel.
@@ -384,6 +402,17 @@ func profileInfo(p store.Profile) ProfileInfo {
 func (a *App) GetState() State {
 	autostartOn := a.autorun.Load()
 	kind := tunnel.NetKind()
+	var checks map[string]autopilot.Check
+	checking := false
+	if a.auto != nil {
+		checks, checking = a.auto.Checks(), a.auto.Checking()
+	}
+	a.sub.mu.Lock()
+	testStarted, testingID := a.sub.lastCheck, a.sub.testingID
+	a.sub.mu.Unlock()
+	if !a.sub.testing.Load() {
+		testingID = ""
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := State{
@@ -401,8 +430,23 @@ func (a *App) GetState() State {
 		RussiaList:   a.russiaStatus,
 	}
 	for _, p := range a.secrets.Profiles {
-		s.Profiles = append(s.Profiles, profileInfo(p))
+		pi := profileInfo(p)
+		if ck, ok := checks[p.ID]; ok {
+			ck.Err = i18n.T(ck.Err)
+			pi.Check = &ck
+		}
+		pi.Roles = autopilot.Roles(a.settings, p.ID)
+		if p.Sub != nil {
+			pi.ServerList = subui.New(p.Sub, kind, subui.Progress{}).Servers
+			if p.ID == testingID {
+				pi.Testing, pi.Tested, pi.TestTotal = true, int(a.sub.tested.Load()), int(a.sub.total.Load())
+			}
+		} else if c, err := awgconf.Parse(p.RawConfig); err == nil {
+			pi.Server = c.Peer.Endpoint
+		}
+		s.Profiles = append(s.Profiles, pi)
 	}
+	s.AutoChecking = checking
 	if a.usage != nil {
 		s.Usage = a.usage.Summary(time.Now())
 	}
@@ -444,7 +488,7 @@ func (a *App) GetState() State {
 	s.NetKind = kind
 	if p := a.secrets.Active(); p != nil && p.Sub != nil {
 		s.HasConfig = len(p.Sub.Servers) > 0
-		s.Sub = subui.New(p.Sub, kind, subui.Progress{Testing: a.sub.testing.Load(), Tested: int(a.sub.tested.Load()), Total: int(a.sub.total.Load())})
+		s.Sub = subui.New(p.Sub, kind, subui.Progress{Testing: a.sub.testing.Load(), Tested: int(a.sub.tested.Load()), Total: int(a.sub.total.Load()), Started: testStarted})
 	}
 	if p := a.secrets.Active(); p != nil && p.RawConfig != "" {
 		s.HasConfig, s.ConfigFor = true, p.ConfigFor
@@ -718,8 +762,17 @@ func (a *App) ExportConfigFile() error {
 	return nil
 }
 
-// SelectProfile makes another profile active, reconnecting on it if the VPN was on.
+// SelectProfile is the user's choice of a profile (window or tray): it stays until the network
+// changes, even with the profile choice by network on.
 func (a *App) SelectProfile(id string) error {
+	if a.auto != nil {
+		a.auto.Manual()
+	}
+	return a.selectProfile(id)
+}
+
+// selectProfile makes another profile active, reconnecting on it if the VPN was on.
+func (a *App) selectProfile(id string) error {
 	return a.switchProfile(func() error {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -982,6 +1035,12 @@ func (a *App) SaveSettings(s store.Settings) error {
 	}
 	if s.DNSPreset == "custom" && len(s.CustomDNS) == 0 {
 		return errors.New("укажите хотя бы один свой DNS-сервер или выберите другой вариант")
+	}
+	if s.WeakPingMs < 100 || s.WeakPingMs > 5000 {
+		return errors.New("порог слабой связи — от 100 до 5000 мс")
+	}
+	if s.CheckEveryMin < 0 || s.CheckEveryMin > 1440 {
+		return errors.New("фоновая проверка — от 0 (выключена) до 1440 минут")
 	}
 	for _, p := range s.VPNOnlyApps {
 		if _, err := os.Stat(p); err != nil {

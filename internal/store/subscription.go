@@ -96,3 +96,31 @@ func (s *Subscription) SetMeasure(id string, m subscription.Measure) {
 	}
 	s.Measures[id] = m
 }
+
+// Clone copies the subscription deeply enough to be read while the original changes.
+func (s *Subscription) Clone() *Subscription {
+	if s == nil {
+		return nil
+	}
+	c := *s
+	c.Servers = append([]subscription.Server(nil), s.Servers...)
+	c.Rules = make(map[string]string, len(s.Rules))
+	for k, v := range s.Rules {
+		c.Rules[k] = v
+	}
+	c.Measures = make(map[string]subscription.Measure, len(s.Measures))
+	for k, v := range s.Measures {
+		c.Measures[k] = v
+	}
+	return &c
+}
+
+// CloneProfiles copies profiles for reading outside the lock that guards them.
+func CloneProfiles(ps []Profile) []Profile {
+	out := make([]Profile, len(ps))
+	for i, p := range ps {
+		out[i] = p
+		out[i].Sub = p.Sub.Clone()
+	}
+	return out
+}

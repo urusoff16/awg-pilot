@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"awgpilot/internal/autopilot"
 	"awgpilot/internal/awgconf"
 	"awgpilot/internal/flows"
 	"awgpilot/internal/geoip"
@@ -34,7 +35,7 @@ import (
 	"awgpilot/internal/vpnkey"
 )
 
-const appVersion = "0.10.0"
+const appVersion = "0.11.0"
 
 var dnsPresets = map[string][]string{
 	"cloudflare": {"1.1.1.1", "1.0.0.1"},
@@ -121,6 +122,8 @@ type App struct {
 	speed        speedtest.Tracker
 
 	secretsBlocked bool // secrets.bin is unreadable and could not be moved aside: never overwrite it
+
+	auto *autopilot.Controller // profile by network, fallback and background checks
 }
 
 // ---- startup ------------------------------------------------------------------------------
@@ -170,6 +173,8 @@ func newApp(plat Platform, dir string, sdk int, trace func(string)) (*App, error
 	go a.watchdog()
 	go a.subscriptionWatcher()
 	go a.subUpdater()
+	a.auto = autopilot.New(autoHost{a})
+	go a.auto.Run(a.stop)
 	return a, nil
 }
 
@@ -271,6 +276,7 @@ type State struct {
 	Lang         string                 `json:"lang"` // interface language in effect: "ru" or "en"
 	Sub          *subui.View            `json:"sub"`  // the active profile's proxy subscription, if it is one
 	NetKind      string                 `json:"net_kind"`
+	AutoChecking bool                   `json:"auto_checking"` // a background check of profiles or servers runs
 }
 
 type ProfileInfo struct {
@@ -283,6 +289,18 @@ type ProfileInfo struct {
 	ConfigFor string `json:"config_for"`
 	Sub       bool   `json:"sub"`
 	Servers   int    `json:"servers"`
+	// Check is the last check of the profile (background or by the user).
+	Check *autopilot.Check `json:"check,omitempty"`
+	// Roles: the networks the profile is chosen for ("wifi", "mobile", "wired") and "fallback".
+	Roles []string `json:"roles,omitempty"`
+	// Server is the VPN server of a config profile (host:port as written in the config).
+	Server string `json:"server,omitempty"`
+	// ServerList are the servers of a subscription profile with their last checks.
+	ServerList []subui.Server `json:"server_list,omitempty"`
+	// Testing: a check of this profile's servers runs (Tested of TestTotal done).
+	Testing   bool `json:"testing,omitempty"`
+	Tested    int  `json:"tested,omitempty"`
+	TestTotal int  `json:"test_total,omitempty"`
 }
 
 type SpeedInfo struct {
@@ -318,6 +336,13 @@ func (a *App) stats() Stats {
 
 func (a *App) GetState() State {
 	st := a.stats()
+	checks := a.auto.Checks()
+	a.sub.mu.Lock()
+	testStarted, testingID := a.sub.lastCheck, a.sub.testingID
+	a.sub.mu.Unlock()
+	if !a.sub.testing.Load() {
+		testingID = ""
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := State{
@@ -329,6 +354,19 @@ func (a *App) GetState() State {
 		pi := ProfileInfo{ID: p.ID, Name: p.Name, HasConfig: p.Usable(), ConfigFor: p.ConfigFor}
 		if p.Sub != nil {
 			pi.Sub, pi.Servers = true, len(p.Sub.Servers)
+		}
+		if ck, ok := checks[p.ID]; ok {
+			ck.Err = i18n.T(ck.Err)
+			pi.Check = &ck
+		}
+		pi.Roles = autopilot.Roles(a.settings, p.ID)
+		if p.Sub != nil {
+			pi.ServerList = subui.New(p.Sub, a.currentKind(), subui.Progress{}).Servers
+			if p.ID == testingID {
+				pi.Testing, pi.Tested, pi.TestTotal = true, int(a.sub.tested.Load()), int(a.sub.total.Load())
+			}
+		} else if c, err := awgconf.Parse(p.RawConfig); err == nil {
+			pi.Server = c.Peer.Endpoint
 		}
 		if k, err := vpnkey.Decode(p.VPNKey); err == nil {
 			pi.HasKey, pi.MaskedKey, pi.Endpoint = true, k.Masked(), k.APIEndpoint
@@ -368,9 +406,10 @@ func (a *App) GetState() State {
 		s.Connections = a.remote.Connections
 	}
 	s.NetKind = a.netKind()
+	s.AutoChecking = a.auto.Checking()
 	if p := a.secrets.Active(); p != nil && p.Sub != nil {
 		s.HasConfig = len(p.Sub.Servers) > 0
-		s.Sub = subui.New(p.Sub, a.currentKind(), subui.Progress{Testing: a.sub.testing.Load(), Tested: int(a.sub.tested.Load()), Total: int(a.sub.total.Load())})
+		s.Sub = subui.New(p.Sub, a.currentKind(), subui.Progress{Testing: a.sub.testing.Load(), Tested: int(a.sub.tested.Load()), Total: int(a.sub.total.Load()), Started: testStarted})
 		s.Sub.NetKind = s.NetKind
 	}
 	if p := a.secrets.Active(); p != nil && p.RawConfig != "" {
@@ -827,6 +866,12 @@ func (a *App) SaveSettings(s store.Settings) error {
 	}
 	if s.DNSPreset == "custom" && len(s.CustomDNS) == 0 {
 		return errors.New("укажите хотя бы один свой DNS-сервер или выберите другой вариант")
+	}
+	if s.WeakPingMs < 100 || s.WeakPingMs > 5000 {
+		return errors.New("порог слабой связи — от 100 до 5000 мс")
+	}
+	if s.CheckEveryMin < 0 || s.CheckEveryMin > 1440 {
+		return errors.New("фоновая проверка — от 0 (выключена) до 1440 минут")
 	}
 	switch s.AppMode {
 	case "", "all":
@@ -1317,7 +1362,10 @@ func (a *App) Call(method, args string) string {
 	case "ExportConfig":
 		return reply(a.ExportConfig())
 	case "SelectProfile":
+		a.auto.Manual() // the user's choice stays until the network changes
 		return reply(nil, a.SelectProfile(str(0)))
+	case "CheckProfile":
+		return reply(a.CheckProfile(str(0)))
 	case "RenameProfile":
 		return reply(nil, a.RenameProfile(str(0), str(1)))
 	case "DeleteProfile":
@@ -1370,6 +1418,12 @@ func (a *App) Call(method, args string) string {
 		return reply(nil, a.SetServerRule(str(0), str(1)))
 	case "UseServer":
 		return reply(nil, a.UseServer(str(0)))
+	case "TestProfileServers":
+		return reply(nil, a.TestProfileServers(str(0)))
+	case "PingServer":
+		return reply(a.PingServer(str(0), str(1)))
+	case "ConnectServer":
+		return reply(nil, a.ConnectServer(str(0), str(1)))
 	case "SubLink":
 		return reply(a.SubLink(str(0)))
 	}
