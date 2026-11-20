@@ -90,13 +90,13 @@ go test -tags live ./internal/xray -v -run "TestLiveLinks|TestLiveEngine"
 ## Сборка
 
 ```powershell
-$env:PATH="D:\CLAUDE_CODE\tools\go\bin;D:\CLAUDE_CODE\tools\gopath\bin;$env:PATH"
-$env:GOPATH="D:\CLAUDE_CODE\tools\gopath"; $env:GOTOOLCHAIN="local"   # Go 1.27 (нужен Xray-core v26.11)
+$env:PATH="C:\CLAUDE_CODE\tools\go\bin;C:\CLAUDE_CODE\tools\gopath\bin;$env:PATH"
+$env:GOPATH="C:\CLAUDE_CODE\tools\gopath"; $env:GOTOOLCHAIN="local"   # Go 1.27 (нужен Xray-core v26.11)
 wails build -platform windows/amd64 -trimpath -ldflags "-s -w"
 go test ./...
 ```
 
-С установщиком (нужен NSIS, портативный 3.13 лежит в `D:\CLAUDE_CODE\tools\nsis-3.13`, добавьте его в PATH): `wails build ... -nsis`. `project.nsi` должен оставаться в UTF-8 с BOM, иначе русский текст установщика испортится. Иконку пересоздаёт `go run ./cmd/genicon build/appicon.png` (затем удалите `build\windows\icon.ico`, Wails соберёт его заново).
+С установщиком (нужен NSIS, портативный 3.13 лежит в `C:\CLAUDE_CODE\tools\nsis-3.13`, добавьте его в PATH): `wails build ... -nsis`. `project.nsi` должен оставаться в UTF-8 с BOM, иначе русский текст установщика испортится. Иконку пересоздаёт `go run ./cmd/genicon build/appicon.png` (затем удалите `build\windows\icon.ico`, Wails соберёт его заново).
 
 Результат: `build\bin\awgpilot.exe`. Для работы туннеля нужна установленная служба (через установщик); для разработки служба запускается в консоли администратора командой `awgpilot.exe --service-console`. Рядом должен лежать `wintun.dll` 0.14.1 (wintun.net, SHA-256 архива `07c25618…ef51`, подпись WireGuard LLC).
 
@@ -155,7 +155,7 @@ build\bin\livecheck.exe tunnel -conf <файл .conf> -log <лог>      # от 
 .\android\build.ps1          # -> build\android\awgpilot-<версия>.apk
 ```
 
-Ключ подписи создаётся один раз в `D:\CLAUDE_CODE\tools\awgpilot-signing` — сохраните эту папку: обновления ставятся поверх только с тем же ключом.
+Ключ подписи создаётся один раз в `C:\CLAUDE_CODE\tools\awgpilot-signing` — сохраните эту папку: обновления ставятся поверх только с тем же ключом.
 
 ## Ограничения
 

@@ -4,7 +4,7 @@ param(
     [string]$Version = "0.11.0",
     [int]$VersionCode = 1100,
     [string[]]$Abis = @("arm64-v8a", "armeabi-v7a", "x86_64"),
-    [string]$SigningDir = "D:\CLAUDE_CODE\tools\awgpilot-signing"
+    [string]$SigningDir = "C:\CLAUDE_CODE\tools\awgpilot-signing"
 )
 $ErrorActionPreference = "Stop"
 
@@ -18,8 +18,8 @@ $minSdk = 21
 $targetSdk = 35
 
 $jdk = if ($env:JAVA_HOME) { $env:JAVA_HOME } else { (Get-ChildItem "C:\Program Files\Java" -Directory -Filter "jdk-*" | Sort-Object Name | Select-Object -Last 1).FullName }
-$env:PATH = "D:\CLAUDE_CODE\tools\go\bin;C:\Program Files\nodejs;$jdk\bin;$env:PATH"
-$env:GOPATH = "D:\CLAUDE_CODE\tools\gopath"
+$env:PATH = "C:\CLAUDE_CODE\tools\go\bin;C:\Program Files\nodejs;$jdk\bin;$env:PATH"
+$env:GOPATH = "C:\CLAUDE_CODE\tools\gopath"
 $env:GOTOOLCHAIN = "local"
 
 function Step($name) { Write-Host "== $name" }
