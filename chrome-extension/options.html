@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>AWG Pilot для Chrome — настройки</title>
+<style>
+  body { max-width: 560px; margin: 24px auto; padding: 0 16px; font: 14px system-ui, "Segoe UI", sans-serif; background: #0e1218; color: #e6edf3; }
+  h1 { font-size: 18px; }
+  label { display: block; margin: 12px 0 4px; color: #8b98a5; }
+  input[type=text], input[type=password], input[type=number], textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #2a3440; border-radius: 9px; background: #151b23; color: #e6edf3; font: inherit; }
+  textarea { height: 190px; font-family: Consolas, monospace; font-size: 12.5px; }
+  .two { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+  .chk { display: flex; gap: 8px; align-items: flex-start; color: #e6edf3; margin-top: 14px; }
+  .chk small { display: block; color: #8b98a5; }
+  button { margin-top: 18px; padding: 9px 18px; border: 0; border-radius: 9px; background: #2f9e78; color: #fff; font: inherit; cursor: pointer; }
+  #saved { margin-left: 10px; color: #5fe0b0; }
+  .hint { color: #8b98a5; font-size: 12.5px; line-height: 1.5; margin-top: 16px; }
+</style>
+</head>
+<body>
+  <h1>AWG Pilot для Chrome</h1>
+  <div class="two">
+    <div><label for="host">Сервер</label><input id="host" type="text" placeholder="141.133.203.49" spellcheck="false"></div>
+    <div><label for="port">Порт</label><input id="port" type="number" min="1" max="65535"></div>
+  </div>
+  <div class="two">
+    <div><label for="user">Логин</label><input id="user" type="text" spellcheck="false" autocomplete="off"></div>
+    <div><label for="pass">Пароль</label><input id="pass" type="password" autocomplete="off"></div>
+  </div>
+  <label for="domains">Сайты через сервер (по одному в строке, поддомены входят)</label>
+  <textarea id="domains" spellcheck="false"></textarea>
+  <div class="chk"><input id="geo" type="checkbox"><span>Подменять геолокацию на Амстердам<small>Для сайтов из списка: они получат координаты Амстердама вместо настоящих.</small></span></div>
+  <div class="chk"><input id="webrtc" type="checkbox"><span>WebRTC только через прокси<small>Иначе звонки и видеочаты в браузере могут показать сайтам ваш настоящий адрес.</small></span></div>
+  <button id="save">Сохранить</button><span id="saved"></span>
+  <div class="hint">Логин и пароль хранятся только в этом браузере. Прокси — обычный HTTP: содержимое сайтов зашифровано (HTTPS), а сам логин прокси передаётся открыто, поэтому не используйте его больше нигде.</div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

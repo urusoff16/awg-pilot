@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "AWG Pilot для Chrome",
+  "version": "0.1.0",
+  "description": "Открывает выбранные сайты (Gemini, ChatGPT, Claude) через ваш сервер AWG Pilot, подменяет геолокацию и закрывает утечку через WebRTC.",
+  "permissions": ["proxy", "storage", "webRequest", "webRequestAuthProvider", "privacy", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "AWG Pilot" },
+  "options_page": "options.html"
+}
